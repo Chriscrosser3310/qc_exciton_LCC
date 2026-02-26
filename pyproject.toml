@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "qc-exciton-lcc"
+version = "0.1.0"
+description = "Exciton and LCC quantum-circuit tooling with backend-agnostic query abstractions"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{name = "Jielun"}]
+dependencies = [
+  "numpy>=1.24",
+]
+
+[project.optional-dependencies]
+chem = ["pyscf>=2.4"]
+qiskit = ["qiskit>=1.0"]
+qualtran = ["qualtran"]
+dev = ["pytest>=8.0", "ruff>=0.6"]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
