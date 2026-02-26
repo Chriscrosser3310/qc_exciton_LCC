@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from qc_exciton_lcc.block_encoding.base import BlockEncoding, BlockEncodingQuery
+from block_encoding.base import BlockEncoding, BlockEncodingQuery
 
 
 @dataclass(frozen=True)
