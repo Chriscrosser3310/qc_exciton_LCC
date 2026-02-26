@@ -37,6 +37,24 @@ bash ./scripts/wsl/run.sh test
 bash ./scripts/wsl/run.sh mos2
 ```
 
+## Ubuntu Native Usage (Second Linux Machine)
+
+On your Ubuntu computer (no WSL wrapper needed):
+
+```bash
+git clone https://github.com/Chriscrosser3310/qc_exciton_LCC.git
+cd qc_exciton_LCC
+bash ./scripts/linux/bootstrap.sh
+bash ./scripts/linux/run.sh test
+bash ./scripts/linux/run.sh mos2
+```
+
+Optional custom command:
+
+```bash
+bash ./scripts/linux/run.sh cmd python -m pytest -q
+```
+
 ## Package Layout
 
 - `src/exciton`: exciton model, builder, screening interfaces

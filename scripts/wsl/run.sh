@@ -12,9 +12,10 @@ if [ "$TASK" = "bootstrap" ]; then
   exit 0
 fi
 
-VENV_DIR=".venv-wsl"
+VENV_DIR="${VENV_DIR:-.venv-wsl}"
+PLATFORM_LABEL="${PLATFORM_LABEL:-WSL}"
 if [ ! -d "$VENV_DIR" ]; then
-  echo "WSL virtualenv not found. Run: bash ./scripts/wsl/bootstrap.sh"
+  echo "$PLATFORM_LABEL virtualenv not found. Run: VENV_DIR=$VENV_DIR PLATFORM_LABEL=$PLATFORM_LABEL bash ./scripts/wsl/bootstrap.sh"
   exit 1
 fi
 
@@ -25,11 +26,11 @@ case "$TASK" in
   help)
     echo "Usage: bash ./scripts/wsl/run.sh <task>"
     echo "Tasks:"
-    echo "  bootstrap  - install/update dependencies in WSL venv"
+    echo "  bootstrap  - install/update dependencies in venv"
     echo "  test       - run pytest"
     echo "  example    - run generic example workflow"
     echo "  mos2       - run MoS2 LMO + screening example"
-    echo "  cmd ...    - run an arbitrary command inside the WSL venv"
+    echo "  cmd ...    - run an arbitrary command inside the configured venv"
     ;;
   test)
     python -m pytest

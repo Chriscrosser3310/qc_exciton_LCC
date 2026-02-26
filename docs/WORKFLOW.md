@@ -28,6 +28,28 @@ This does:
 .\scripts\run_in_wsl.ps1 cmd python -m pytest -q
 ```
 
+## 1B. Environment Workflow (Native Ubuntu)
+
+On your Ubuntu machine:
+
+```bash
+git clone https://github.com/Chriscrosser3310/qc_exciton_LCC.git
+cd qc_exciton_LCC
+bash ./scripts/linux/bootstrap.sh
+bash ./scripts/linux/run.sh test
+bash ./scripts/linux/run.sh mos2
+```
+
+Custom command in the same venv:
+
+```bash
+bash ./scripts/linux/run.sh cmd python -m pytest -q
+```
+
+Notes:
+- default Linux venv path is `.venv-linux`
+- you can override with `VENV_DIR=/path/to/venv`
+
 ## 2. Chemistry -> LMO -> Integrals Workflow
 
 Main module: [src/chem/pyscf_adapter.py](../src/chem/pyscf_adapter.py)
