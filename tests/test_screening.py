@@ -1,4 +1,4 @@
-from qc_exciton_lcc.exciton.screening import ConstantScreening, ScreeningQuery
+from exciton.screening import ConstantScreening, ScreeningQuery
 
 
 def test_constant_screening_returns_same_value():

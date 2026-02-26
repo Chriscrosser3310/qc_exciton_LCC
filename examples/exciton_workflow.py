@@ -1,9 +1,9 @@
-from qc_exciton_lcc.algorithms import GeneralizedQueryAlgorithm, QueryCall, QuerySchedule
-from qc_exciton_lcc.backends import QiskitBackendAdapter, ResourceEstimatorAdapter
-from qc_exciton_lcc.block_encoding import BlockEncoding, BlockEncodingMetadata, BlockEncodingQuery
-from qc_exciton_lcc.exciton.builder import ExcitonBuilder
-from qc_exciton_lcc.exciton.model import OrbitalPartition
-from qc_exciton_lcc.exciton.screening import ConstantScreening
+from algorithms import GeneralizedQueryAlgorithm, QueryCall, QuerySchedule
+from backends import QiskitBackendAdapter, ResourceEstimatorAdapter
+from block_encoding import BlockEncoding, BlockEncodingMetadata, BlockEncodingQuery
+from exciton.builder import ExcitonBuilder
+from exciton.model import OrbitalPartition
+from exciton.screening import ConstantScreening
 
 
 class DemoEncoding(BlockEncoding):

@@ -1,5 +1,5 @@
-from qc_exciton_lcc.algorithms import QueryCall, QuerySchedule
-from qc_exciton_lcc.block_encoding import BlockEncoding, BlockEncodingMetadata, BlockEncodingQuery
+from algorithms import QueryCall, QuerySchedule
+from block_encoding import BlockEncoding, BlockEncodingMetadata, BlockEncodingQuery
 
 
 class _Encoding(BlockEncoding):
