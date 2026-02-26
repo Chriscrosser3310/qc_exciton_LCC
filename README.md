@@ -1,34 +1,51 @@
 # qc_exciton_lcc
 
-Initial scaffold for exciton-focused quantum simulation workflows with:
-- exciton model and screening abstractions in one module boundary
-- block-encoding interfaces and query schedules
-- backend adapters for Qiskit, Qualtran, and resource-estimation exporters
-- PySCF adapter stubs for chemistry/LMO data ingestion
+Exciton-focused quantum simulation tooling with:
+- block-encoding abstractions and sparse-oracle variants
+- query-scheduled algorithm interfaces
+- backend adapters (Qiskit/Qualtran/resource-estimation)
+- PySCF chemistry utilities for LMO + screened Coulomb workflows
 
-## Install
+## WSL Quick Start (Recommended on Windows for PySCF)
 
-```bash
-pip install -e .
+1. Install WSL + Ubuntu and open a WSL terminal once.
+2. From PowerShell in this repo:
+
+```powershell
+.\scripts\run_in_wsl.ps1 bootstrap
 ```
 
-Optional extras:
+Then run common tasks:
 
-```bash
-pip install -e .[dev,chem,qiskit]
+```powershell
+.\scripts\run_in_wsl.ps1 test
+.\scripts\run_in_wsl.ps1 example
+.\scripts\run_in_wsl.ps1 mos2
 ```
 
-## Layout
+Run custom commands inside the same WSL virtualenv:
 
-- `src/qc_exciton_lcc/exciton`: exciton domain model + screening providers
-- `src/qc_exciton_lcc/block_encoding`: backend-agnostic block-encoding contracts
-- `src/qc_exciton_lcc/algorithms`: query schedule and generalized query runner skeleton
-- `src/qc_exciton_lcc/backends`: interfaces to map abstractions to Qiskit/Qualtran/estimators
-- `src/qc_exciton_lcc/chem`: PySCF integration stubs
+```powershell
+.\scripts\run_in_wsl.ps1 cmd python -m pytest -q
+```
 
-## Next build targets
+## Linux/WSL Direct Usage
 
-1. Implement LMO transformation pipeline in `chem/pyscf_adapter.py`.
-2. Build exciton Hamiltonian assembly in `exciton/builder.py`.
-3. Add one concrete block-encoding strategy and wire to backend translators.
-4. Add logical and physical resource estimator adapters.
+```bash
+bash ./scripts/wsl/bootstrap.sh
+bash ./scripts/wsl/run.sh test
+bash ./scripts/wsl/run.sh mos2
+```
+
+## Package Layout
+
+- `src/exciton`: exciton model, builder, screening interfaces
+- `src/block_encoding`: block-encoding contracts and sparse matrix scheme
+- `src/algorithms`: query schedule and algorithm skeletons
+- `src/backends`: backend/export adapters
+- `src/chem`: PySCF integration (LMO/integrals/screening)
+- `src/oracles`: function IR and reversible synthesis with cost estimates
+
+## Detailed Workflow
+
+See [docs/WORKFLOW.md](docs/WORKFLOW.md) for the full step-by-step workflow.
