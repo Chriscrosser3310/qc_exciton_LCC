@@ -64,6 +64,15 @@ bash ./scripts/linux/run.sh cmd python -m pytest -q
 - `src/chem`: PySCF integration (LMO/integrals/screening)
 - `src/oracles`: function IR and reversible synthesis with cost estimates
 
+## QSVT Script (Qualtran)
+
+Build a QSVT-style composite bloq from a block-encoding:
+
+```bash
+python scripts/qsvt_qualtran_demo.py --queries 6 --alternate-adjoint
+python scripts/qsvt_qualtran_demo.py --queries 4 --signal-bits 2 --phase-mode projector_zero --alternate-adjoint
+```
+
 ## Detailed Workflow
 
 See [docs/WORKFLOW.md](docs/WORKFLOW.md) for the full step-by-step workflow.
