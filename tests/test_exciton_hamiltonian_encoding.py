@@ -1,70 +1,77 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
+
+
+qualtran = pytest.importorskip("qualtran")
+_ = qualtran
 
 from block_encoding.exciton_hamiltonian_encoding import (
-    build_exciton_hamiltonian_encoding,
-    build_f_and_v_block_encodings,
+    ExcitonHamiltonianBlockEncoding,
+    build_exciton_hamiltonian_block_encoding,
 )
+from block_encoding.f_register_sum_block_encoding import OneParticleFSumBlockEncoding
+from block_encoding.two_particle_v_sum_block_encoding import TwoParticleVSumBlockEncoding
+from block_encoding.two_particle_w_sum_block_encoding import TwoParticleWSumBlockEncoding
 
 
-def test_build_f_and_v_block_encodings_shapes():
-    f_be, vd_be, vx_be = build_f_and_v_block_encodings(
-        lattice_shape=(3,),
-        r_loc=1,
-        r_c=1,
-        epsilon=0.0,
+def _demo_tables(l: int = 2):
+    f = 0.2 * np.ones((l, 1), dtype=np.float64)  # D=1, R_loc=0
+    w = 0.3 * np.ones((l, l, 1, 1), dtype=np.float64)  # D=1, R_c=R_loc=0
+    v = 0.4 * np.ones((l, l, 1, 1), dtype=np.float64)
+    return f, w, v
+
+
+def test_exciton_hamiltonian_block_encoding_signature_and_components():
+    f, w, v = _demo_tables()
+    bloq = build_exciton_hamiltonian_block_encoding(
+        num_pairs=1,
+        D=1,
+        L=2,
+        R_c=0,
+        R_loc=0,
+        F=f,
+        W=w,
+        V=v,
+        entry_bitsize=8,
     )
-    assert f_be.matrix_unpadded_dim == 3
-    assert vd_be.matrix_unpadded_dim == 9
-    assert vx_be.matrix_unpadded_dim == 9
-
-
-def test_exciton_term_counts_for_m2():
-    # m=2:
-    # +F first: 2, -F second: 2
-    # direct first pairs: C(2,2)=1
-    # direct second pairs: C(2,2)=1
-    # cross pairs: 2*2=4 each contributes (+exchange) + (-direct) => 8
-    # total = 2 + 2 + 1 + 1 + 8 = 14
-    enc = build_exciton_hamiltonian_encoding(
-        m=2,
-        lattice_shape=(3,),
-        r_loc=1,
-        r_c=1,
-        epsilon=0.0,
-    )
-    assert len(enc.terms) == 14
-
-    first_f = [t for t in enc.terms if t.op_kind == "F" and t.set_label == "first"]
-    second_f = [t for t in enc.terms if t.op_kind == "F" and t.set_label == "second"]
-    cross_ex = [t for t in enc.terms if t.op_kind == "V_exchange" and t.set_label == "cross"]
-    cross_dir = [
-        t
-        for t in enc.terms
-        if t.op_kind == "V_direct" and t.set_label == "cross" and t.coefficient < 0
+    assert isinstance(bloq, ExcitonHamiltonianBlockEncoding)
+    reg_names = [r.name for r in bloq.signature]
+    assert reg_names == [
+        "q",
+        "h_sel",
+        "f_sel",
+        "f_m",
+        "w_sel",
+        "w_m",
+        "w_l",
+        "v_sel",
+        "v_m",
+        "v_l",
+        "r0",
+        "r1",
     ]
-    assert len(first_f) == 2
-    assert all(t.coefficient > 0 for t in first_f)
-    assert len(second_f) == 2
-    assert all(t.coefficient < 0 for t in second_f)
-    assert len(cross_ex) == 4
-    assert len(cross_dir) == 4
+
+    assert isinstance(bloq.f_bloq, OneParticleFSumBlockEncoding)
+    assert isinstance(bloq.w_bloq, TwoParticleWSumBlockEncoding)
+    assert isinstance(bloq.v_bloq, TwoParticleVSumBlockEncoding)
 
 
-def test_exciton_builder_defaults_match_explicit_maxdist():
-    # shape=(3,) => max_dist=2 (non-periodic)
-    enc_default = build_exciton_hamiltonian_encoding(
-        m=1,
-        lattice_shape=(3,),
-        epsilon=0.0,
+def test_exciton_hamiltonian_block_encoding_builds():
+    f, w, v = _demo_tables()
+    bloq = build_exciton_hamiltonian_block_encoding(
+        num_pairs=1,
+        D=1,
+        L=2,
+        R_c=0,
+        R_loc=0,
+        F=f,
+        W=w,
+        V=v,
+        entry_bitsize=6,
     )
-    enc_explicit = build_exciton_hamiltonian_encoding(
-        m=1,
-        lattice_shape=(3,),
-        r_loc=2,
-        r_c=2,
-        epsilon=0.0,
-    )
-    assert np.allclose(enc_default.f_bundle.matrix, enc_explicit.f_bundle.matrix)
-    assert np.allclose(enc_default.v_direct_bundle.matrix, enc_explicit.v_direct_bundle.matrix)
+
+    # Basic decomposition smoke-test for the new 3-term composition.
+    cb = bloq.decompose_bloq()
+    assert cb is not None

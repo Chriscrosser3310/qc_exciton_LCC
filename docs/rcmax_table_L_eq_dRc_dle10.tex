@@ -1,0 +1,42 @@
+﻿\begin{table}[t]
+\centering
+\caption{Estimated largest feasible $R_c$ with $L_c=dR_c$ for $d\le 10$ under runtime/qubit budgets.}
+\label{tab:rcmax_l_eq_drc}
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{c c c r r r c c}
+\hline
+$d$ & $R_{c,\max}$ & $L_c=dR_c$ & Toffoli-like/query & Clifford/query (est.) & Total Toffoli-like ($d$ queries) & Est. runtime (h) & Est. logical qubits \\
+\hline
+1  & 34 & 34 & 717,808,616 & 3,051,010,637 & 717,808,616 & 10.692 & 92 \\
+2  & 20 & 40 & 385,212,852 & 1,726,889,655 & 770,425,705 & 11.476 & 88 \\
+3  & 14 & 42 & 221,652,288 & 1,017,068,402 & 664,956,864 & 9.905 & 84 \\
+4  & 11 & 44 & 158,146,998 & 736,900,464 & 632,587,991 & 9.423 & 84 \\
+5  & 9  & 45 & 115,375,533 & 542,787,627 & 576,877,667 & 8.593 & 84 \\
+6  & 8  & 48 & 108,296,411 & 512,479,386 & 649,778,465 & 9.679 & 84 \\
+7  & 7  & 49 & 89,306,523  & 425,898,485 & 625,145,658 & 9.312 & 80 \\
+8  & 6  & 48 & 64,609,591  & 311,009,080 & 516,876,728 & 7.699 & 80 \\
+9  & 6  & 54 & 85,083,219  & 412,772,839 & 765,748,969 & 11.406 & 80 \\
+10 & 5  & 50 & 51,527,964  & 251,425,224 & 515,279,641 & 7.676 & 80 \\
+\hline
+\end{tabular}
+}
+
+\vspace{0.5em}
+\begin{minipage}{0.98\linewidth}
+\footnotesize
+\textbf{Parameter specification used for this table.}
+(1) Fixed parameters: $D=2$, $R_{\mathrm{loc}}=1$, \texttt{entry\_bitsize}=8. \\
+(2) Constraint replaced by: $L_c=dR_c$ with integer $R_c$, and $d\le 10$. \\
+(3) Budgets: logical qubits $\le 100$, total runtime $\le 12$ hours. \\
+(4) Runtime model: Qualtran surface-code estimate with \texttt{phys\_err}=$10^{-3}$,
+\texttt{cycle\_time\_us}=1.0, \\
+\hspace*{1.2em}\texttt{factory}=\texttt{MultiFactory(CCZ2TFactory(19,31), n\_factories=4)},
+\texttt{data\_block}=\texttt{SimpleDataBlock(data\_d=31, routing\_overhead=0.5)}. \\
+(5) These are \emph{fit-based estimates} (not direct full-table constructions for large sizes). \\
+(6) Estimation models used: \\
+\hspace*{1.2em}$\text{Toffoli/query}(L_c,R_c)\approx 54.50\,L_c^{2.3371}(2R_c+1)^{1.9254}$, \\
+\hspace*{1.2em}$\text{hours/query}\approx 1.48958\times 10^{-8}\times\text{Toffoli/query}$, \\
+\hspace*{1.2em}$n_{\mathrm{logical}}\approx 16 + 8\lceil\log_2 L_c\rceil + 4\lceil\log_2(2R_c+1)\rceil$. \\
+(7) Clifford/query (est.) uses $\text{Clifford/query}\approx 4.25\times\text{Toffoli/query}$ (calibrated from measured points at $R_c=1..8$, $L_c=4,8$).
+\end{minipage}
+\end{table}

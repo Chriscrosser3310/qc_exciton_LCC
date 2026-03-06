@@ -1,0 +1,47 @@
+﻿\begin{table}[t]
+\centering
+\caption{Largest feasible $L$ for each $d<10$ with gate-count columns under fixed runtime and qubit budgets.}
+\label{tab:ld_feasible_gatecols_d2_rc3_rloc1}
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{c c r r r c c}
+\hline
+$d$ & $L_{\max}$ (pow2) & Toffoli-like/query & Clifford/query & Total Toffoli-like ($d$ queries) & Est. runtime (h) & Est. logical qubits \\
+\hline
+1 & 128 & 204,613,222 & 946,964,524 & 204,613,222 & 3.048 & 84 \\
+2 & 128 & 204,613,222 & 946,964,524 & 409,226,444 & 6.096 & 84 \\
+3 & 128 & 204,613,222 & 946,964,524 & 613,839,666 & 9.144 & 84 \\
+4 & 64  & 39,262,878  & 185,314,117 & 157,051,512 & 2.339 & 76 \\
+5 & 64  & 39,262,878  & 185,314,117 & 196,314,390 & 2.924 & 76 \\
+6 & 64  & 39,262,878  & 185,314,117 & 235,577,268 & 3.509 & 76 \\
+7 & 64  & 39,262,878  & 185,314,117 & 274,840,146 & 4.094 & 76 \\
+8 & 64  & 39,262,878  & 185,314,117 & 314,103,024 & 4.679 & 76 \\
+9 & 64  & 39,262,878  & 185,314,117 & 353,365,902 & 5.264 & 76 \\
+\hline
+\end{tabular}
+}
+
+\vspace{0.5em}
+\begin{minipage}{0.98\linewidth}
+\footnotesize
+\textbf{Parameter specification used for this table.}
+(1) Problem parameters: $D=2$, $R_c=3$, $R_{\mathrm{loc}}=1$. \\
+(2) Oracle/model: \texttt{TwoParticleSparseBlockEncoding} with full data-loading row-entry oracle and direct convention for $V$. \\
+(3) Entry precision: \texttt{entry\_bitsize}=8. \\
+(4) Runtime model: Qualtran surface-code estimate with \texttt{phys\_err}=$10^{-3}$, \texttt{cycle\_time\_us}=1.0, \\
+\hspace*{1.2em}\texttt{factory}=\texttt{MultiFactory(CCZ2TFactory(19,31), n\_factories=4)},
+\texttt{data\_block}=\texttt{SimpleDataBlock(data\_d=31, routing\_overhead=0.5)}. \\
+(5) Constraints enforced when selecting $L_{\max}$: logical qubits $\le 100$, total runtime $\le 12$ hours, and $d<10$. \\
+(6) $L$ restricted to powers of two to match the current exact modular decomposition path in the index oracle. \\
+(7) Measured anchors used for fits: $L\in\{2,4,8,16\}$ with \\
+\hspace*{1.2em}Toffoli-like/query $=\{9240, 63318, 264900, 1407102\}$, \\
+\hspace*{1.2em}Clifford/query $=\{49802, 311524, 1287278, 7132972\}$, \\
+\hspace*{1.2em}hours/query $=\{1.376\times10^{-4}, 9.432\times10^{-4}, 3.946\times10^{-3}, 2.096\times10^{-2}\}$, \\
+\hspace*{1.2em}logical qubits $=\{36,44,52,60\}$. \\
+(8) Extrapolation models for larger $L$: \\
+\hspace*{1.2em}$\text{Toffoli/query}(L)\approx 1.960\times 10^3\,L^{2.3817}$, \\
+\hspace*{1.2em}$\text{Clifford/query}(L)\approx 1.041\times 10^4\,L^{2.3533}$, \\
+\hspace*{1.2em}$\text{hours/query}(L)\approx 2.920\times 10^{-5}\,L^{2.3817}$, \\
+\hspace*{1.2em}$n_{\mathrm{logical}}(L)\approx 28 + 8\log_2 L$. \\
+(9) Rows at $L=64,128$ are therefore \emph{fit-based estimates}, not direct full-table constructions.
+\end{minipage}
+\end{table}
