@@ -7,13 +7,13 @@ import pytest
 qualtran = pytest.importorskip("qualtran")
 _ = qualtran
 
-from block_encoding.exciton_hamiltonian_encoding import (
+from integrations.qualtran.block_encoding.exciton_hamiltonian_encoding import (
     ExcitonHamiltonianBlockEncoding,
     build_exciton_hamiltonian_block_encoding,
 )
-from block_encoding.f_register_sum_block_encoding import OneParticleFSumBlockEncoding
-from block_encoding.two_particle_v_sum_block_encoding import TwoParticleVSumBlockEncoding
-from block_encoding.two_particle_w_sum_block_encoding import TwoParticleWSumBlockEncoding
+from integrations.qualtran.block_encoding.f_register_sum_block_encoding import OneParticleFSumBlockEncoding
+from integrations.qualtran.block_encoding.two_particle_v_sum_block_encoding import TwoParticleVSumBlockEncoding
+from integrations.qualtran.block_encoding.two_particle_w_sum_block_encoding import TwoParticleWSumBlockEncoding
 
 
 def _demo_tables(l: int = 2):

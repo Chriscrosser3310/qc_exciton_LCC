@@ -1,33 +1,18 @@
-"""Block-encoding contracts."""
+"""Qualtran-backed block-encoding helpers."""
 
-from .base import BlockEncoding, BlockEncodingMetadata, BlockEncodingQuery
-from .sparse_matrix import (
-    AmplitudeEncoding,
-    ColAccessOracle,
-    EntryBinaryOracle,
-    FullDataLoadingAmplitudeOracle,
-    RowAccessOracle,
-    SparseMatrixBlockEncoding,
-    SparseOracleBundle,
+from .lattice_index_oracles import (
+    SingleParticleSparseIndexOracle,
+    TwoParticleSparseIndexOracle,
+    build_lattice_sparse_index_oracles,
 )
-from .qualtran_sparse_bench import (
+from .qrom_sparse import SparseTensorCOO, qrom_build_from_sparse_data, sparse_coo_from_items
+from .sparse_bench import (
     PolylogSparseIndex,
     build_all_sparse_oracles,
     build_product_matrices_from_tensors,
     build_sparse_oracle_from_matrix,
     build_thresholded_benchmark_tensors,
 )
-from .qualtran_lattice_index_oracles import (
-    SingleParticleSparseIndexOracle,
-    TwoParticleSparseIndexOracle,
-    build_lattice_sparse_index_oracles,
-)
-from .exciton_hamiltonian_encoding import (
-    ExcitonHamiltonianBlockEncoding,
-    build_exciton_hamiltonian_block_encoding,
-    build_exciton_hamiltonian_encoding,
-)
-from .qrom_sparse import SparseTensorCOO, qrom_build_from_sparse_data, sparse_coo_from_items
 from .controlled_permutation import (
     MultiControlledRegisterPermutation,
     build_multi_controlled_register_permutation,
@@ -36,20 +21,8 @@ from .f_register_sum_block_encoding import (
     OneParticleControlledFSumBlockEncoding,
     OneParticleFSumBlockEncoding,
     build_one_particle_controlled_f_sum_block_encoding,
-    build_signed_f_register_sum_block_encoding,
     build_one_particle_f_sum_block_encoding,
-)
-from .two_particle_w_sum_block_encoding import (
-    TwoParticleControlledWSumBlockEncoding,
-    TwoParticleWSumBlockEncoding,
-    build_two_particle_controlled_w_sum_block_encoding,
-    build_two_particle_w_sum_block_encoding,
-)
-from .two_particle_v_sum_block_encoding import (
-    TwoParticleControlledVSumBlockEncoding,
-    TwoParticleVSumBlockEncoding,
-    build_two_particle_controlled_v_sum_block_encoding,
-    build_two_particle_v_sum_block_encoding,
+    build_signed_f_register_sum_block_encoding,
 )
 from .two_particle_row_oracles import (
     OneParticleControlledSparseBlockEncoding,
@@ -62,7 +35,6 @@ from .two_particle_row_oracles import (
     TwoParticleSparseBlockEncoding,
     TwoParticleSparseOracle,
     TwoParticleRowQueryBloq,
-    build_two_particle_sparse_block_encoding,
     build_one_particle_controlled_sparse_block_encoding,
     build_one_particle_row_entry_oracle,
     build_one_particle_row_index_oracle,
@@ -70,35 +42,40 @@ from .two_particle_row_oracles import (
     build_two_particle_controlled_sparse_block_encoding,
     build_two_particle_row_entry_oracle,
     build_two_particle_row_index_oracle,
-    build_two_particle_sparse_oracle,
     build_two_particle_row_query_bloq,
+    build_two_particle_sparse_block_encoding,
+    build_two_particle_sparse_oracle,
+)
+from .two_particle_v_sum_block_encoding import (
+    TwoParticleControlledVSumBlockEncoding,
+    TwoParticleVSumBlockEncoding,
+    build_two_particle_controlled_v_sum_block_encoding,
+    build_two_particle_v_sum_block_encoding,
+)
+from .two_particle_w_sum_block_encoding import (
+    TwoParticleControlledWSumBlockEncoding,
+    TwoParticleWSumBlockEncoding,
+    build_two_particle_controlled_w_sum_block_encoding,
+    build_two_particle_w_sum_block_encoding,
+)
+from .exciton_hamiltonian_encoding import (
+    ExcitonHamiltonianBlockEncoding,
+    build_exciton_hamiltonian_block_encoding,
+    build_exciton_hamiltonian_encoding,
 )
 
 __all__ = [
-    "BlockEncoding",
-    "BlockEncodingMetadata",
-    "BlockEncodingQuery",
-    "AmplitudeEncoding",
-    "ColAccessOracle",
-    "EntryBinaryOracle",
-    "FullDataLoadingAmplitudeOracle",
-    "RowAccessOracle",
-    "SparseMatrixBlockEncoding",
-    "SparseOracleBundle",
+    "SingleParticleSparseIndexOracle",
+    "TwoParticleSparseIndexOracle",
+    "build_lattice_sparse_index_oracles",
+    "SparseTensorCOO",
+    "qrom_build_from_sparse_data",
+    "sparse_coo_from_items",
+    "PolylogSparseIndex",
     "build_thresholded_benchmark_tensors",
     "build_product_matrices_from_tensors",
     "build_sparse_oracle_from_matrix",
     "build_all_sparse_oracles",
-    "PolylogSparseIndex",
-    "SingleParticleSparseIndexOracle",
-    "TwoParticleSparseIndexOracle",
-    "build_lattice_sparse_index_oracles",
-    "ExcitonHamiltonianBlockEncoding",
-    "build_exciton_hamiltonian_block_encoding",
-    "build_exciton_hamiltonian_encoding",
-    "SparseTensorCOO",
-    "qrom_build_from_sparse_data",
-    "sparse_coo_from_items",
     "MultiControlledRegisterPermutation",
     "build_multi_controlled_register_permutation",
     "OneParticleControlledFSumBlockEncoding",
@@ -106,14 +83,6 @@ __all__ = [
     "build_one_particle_controlled_f_sum_block_encoding",
     "build_one_particle_f_sum_block_encoding",
     "build_signed_f_register_sum_block_encoding",
-    "TwoParticleControlledWSumBlockEncoding",
-    "TwoParticleWSumBlockEncoding",
-    "build_two_particle_controlled_w_sum_block_encoding",
-    "build_two_particle_w_sum_block_encoding",
-    "TwoParticleControlledVSumBlockEncoding",
-    "TwoParticleVSumBlockEncoding",
-    "build_two_particle_controlled_v_sum_block_encoding",
-    "build_two_particle_v_sum_block_encoding",
     "OneParticleControlledSparseBlockEncoding",
     "OneParticleRowEntryOracle",
     "OneParticleRowIndexOracle",
@@ -124,7 +93,6 @@ __all__ = [
     "TwoParticleSparseBlockEncoding",
     "TwoParticleSparseOracle",
     "TwoParticleRowQueryBloq",
-    "build_two_particle_sparse_block_encoding",
     "build_one_particle_controlled_sparse_block_encoding",
     "build_one_particle_row_entry_oracle",
     "build_one_particle_row_index_oracle",
@@ -132,6 +100,18 @@ __all__ = [
     "build_two_particle_controlled_sparse_block_encoding",
     "build_two_particle_row_entry_oracle",
     "build_two_particle_row_index_oracle",
-    "build_two_particle_sparse_oracle",
     "build_two_particle_row_query_bloq",
+    "build_two_particle_sparse_block_encoding",
+    "build_two_particle_sparse_oracle",
+    "TwoParticleControlledVSumBlockEncoding",
+    "TwoParticleVSumBlockEncoding",
+    "build_two_particle_controlled_v_sum_block_encoding",
+    "build_two_particle_v_sum_block_encoding",
+    "TwoParticleControlledWSumBlockEncoding",
+    "TwoParticleWSumBlockEncoding",
+    "build_two_particle_controlled_w_sum_block_encoding",
+    "build_two_particle_w_sum_block_encoding",
+    "ExcitonHamiltonianBlockEncoding",
+    "build_exciton_hamiltonian_block_encoding",
+    "build_exciton_hamiltonian_encoding",
 ]

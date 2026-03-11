@@ -7,7 +7,7 @@ import pytest
 qualtran = pytest.importorskip("qualtran")
 _ = qualtran
 
-from block_encoding.controlled_permutation import (
+from integrations.qualtran.block_encoding.controlled_permutation import (
     MultiControlledRegisterPermutation,
     build_multi_controlled_register_permutation,
 )

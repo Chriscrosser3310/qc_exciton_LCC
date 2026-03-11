@@ -14,7 +14,7 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 from qualtran.resource_counting import QECGatesCost, get_cost_value
-from block_encoding.qualtran_lattice_index_oracles import (
+from integrations.qualtran.block_encoding.lattice_index_oracles import (
     SingleParticleSparseIndexOracle,
     TwoParticleSparseIndexOracle,
 )

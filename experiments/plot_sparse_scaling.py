@@ -15,7 +15,7 @@ SRC_DIR = REPO_ROOT / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from block_encoding.qualtran_sparse_bench import build_all_sparse_oracles
+from integrations.qualtran.block_encoding.sparse_bench import build_all_sparse_oracles
 from qualtran.resource_counting import QECGatesCost, get_cost_value
 
 

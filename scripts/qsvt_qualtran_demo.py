@@ -19,7 +19,7 @@ SRC_DIR = REPO_ROOT / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from algorithms.qsvt_qualtran import build_qsvt_composite, make_query_schedule
+from integrations.qualtran.algorithms import build_qsvt_composite, make_query_schedule
 from qualtran import BloqBuilder, QUInt
 from qualtran.bloqs.arithmetic import XorK
 from qualtran.bloqs.basic_gates import CNOT, CRz, Rz

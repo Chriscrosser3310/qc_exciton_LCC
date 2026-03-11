@@ -11,7 +11,7 @@ _ = cirq
 
 from qualtran.cirq_interop import BloqAsCirqGate, get_named_qubits
 
-from block_encoding.f_register_sum_block_encoding import (
+from integrations.qualtran.block_encoding.f_register_sum_block_encoding import (
     OneParticleControlledFSumBlockEncoding,
     OneParticleFSumBlockEncoding,
     build_one_particle_controlled_f_sum_block_encoding,

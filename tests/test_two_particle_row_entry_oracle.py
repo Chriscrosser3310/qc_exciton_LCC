@@ -7,7 +7,7 @@ import pytest
 qualtran = pytest.importorskip("qualtran")
 _ = qualtran
 
-from block_encoding.two_particle_row_oracles import (
+from integrations.qualtran.block_encoding.two_particle_row_oracles import (
     OneParticleControlledSparseBlockEncoding,
     OneParticleRowEntryOracle,
     OneParticleRowIndexOracle,

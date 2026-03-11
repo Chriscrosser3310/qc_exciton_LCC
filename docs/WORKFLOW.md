@@ -137,21 +137,12 @@ Main module: [src/block_encoding/sparse_matrix.py](../src/block_encoding/sparse_
 
 ### Reversible compilation + costs
 
-Oracle synthesis modules:
-- [src/oracles/function_ir.py](../src/oracles/function_ir.py)
-- [src/oracles/reversible_synth.py](../src/oracles/reversible_synth.py)
+Legacy oracle-synthesis utilities have been archived under:
+- `archive/non_qualtran_core/src/oracles/`
 
-For row/col oracles:
-- call `compile_reversible_circuit()`
-- then call `.estimate_cost()`
-
-Cost fields:
-- `t_count`
-- `toffoli_count`
-- `cnot_count`
-- `x_count`
-- `t_depth_estimate`
-- `ancilla_peak_estimate`
+Active oracle/block-encoding development is integration-specific:
+- Qualtran: `src/integrations/qualtran/block_encoding/`
+- PennyLane: `src/integrations/pennylane/`
 
 ## 5. Recommended Iteration Loop
 
@@ -165,6 +156,7 @@ Cost fields:
 
 ## 6. Known Conventions
 
-- Source package is flat under `src/` (e.g., `from chem import ...`, `from block_encoding import ...`).
-- Do not reintroduce old `qc_exciton_lcc.*` import paths.
+- Source layout is integration-first under `src/integrations/<provider>/...`.
+- Core chemistry/exciton utilities remain under `src/chem` and `src/exciton`.
+- Do not reintroduce archived adapter-agnostic paths from `archive/legacy_adapter_layer/`.
 - Use WSL runner scripts for anything requiring PySCF.

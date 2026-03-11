@@ -7,7 +7,7 @@ import pytest
 qualtran = pytest.importorskip("qualtran")
 _ = qualtran
 
-from block_encoding.qrom_sparse import SparseTensorCOO, qrom_build_from_sparse_data, sparse_coo_from_items
+from integrations.qualtran.block_encoding.qrom_sparse import SparseTensorCOO, qrom_build_from_sparse_data, sparse_coo_from_items
 
 
 def test_sparse_tensor_coo_to_dense():

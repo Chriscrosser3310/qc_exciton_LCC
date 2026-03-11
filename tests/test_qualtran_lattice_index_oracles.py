@@ -6,7 +6,7 @@ import pytest
 qualtran = pytest.importorskip("qualtran")
 _ = qualtran
 
-from block_encoding.qualtran_lattice_index_oracles import (
+from integrations.qualtran.block_encoding.lattice_index_oracles import (
     SingleParticleSparseIndexOracle,
     TwoParticleSparseIndexOracle,
     build_lattice_sparse_index_oracles,

@@ -10,7 +10,7 @@ try:
     from qualtran.bloqs.basic_gates import GlobalPhase, Rz
 except ImportError as exc:  # pragma: no cover - optional dependency
     raise ImportError(
-        "Qualtran is required for algorithms.qsvt_qualtran. Install with extra '[qualtran]'."
+        "Qualtran is required for integrations.qualtran.algorithms. Install with extra '[qualtran]'."
     ) from exc
 
 

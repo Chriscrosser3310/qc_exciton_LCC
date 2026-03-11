@@ -6,7 +6,7 @@ import pytest
 qualtran = pytest.importorskip("qualtran")
 _ = qualtran
 
-from block_encoding.qualtran_sparse_bench import (
+from integrations.qualtran.block_encoding.sparse_bench import (
     build_all_sparse_oracles,
     build_product_matrices_from_tensors,
     build_thresholded_benchmark_tensors,

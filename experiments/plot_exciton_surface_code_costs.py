@@ -22,7 +22,7 @@ from qualtran.surface_code.gidney_fowler_model import (
     iter_simple_data_blocks,
 )
 
-from block_encoding.qualtran_lattice_index_oracles import (
+from integrations.qualtran.block_encoding.lattice_index_oracles import (
     SingleParticleSparseIndexOracle,
     TwoParticleSparseIndexOracle,
 )

@@ -17,7 +17,7 @@ from qualtran.resource_counting import GateCounts, QECGatesCost, get_cost_value
 from qualtran.surface_code import CCZ2TFactory, MultiFactory, SimpleDataBlock
 from qualtran.surface_code.gidney_fowler_model import get_ccz2t_costs
 
-from block_encoding.qualtran_lattice_index_oracles import (
+from integrations.qualtran.block_encoding.lattice_index_oracles import (
     SingleParticleSparseIndexOracle,
     TwoParticleSparseIndexOracle,
 )

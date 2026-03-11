@@ -13,7 +13,7 @@ if str(SRC_DIR) not in sys.path:
 
 from qualtran.resource_counting import QECGatesCost, get_cost_value
 
-from block_encoding.two_particle_row_oracles import build_two_particle_sparse_block_encoding
+from integrations.qualtran.block_encoding.two_particle_row_oracles import build_two_particle_sparse_block_encoding
 from exciton.benchmark_tensors import generate_v_tensor
 
 

@@ -13,7 +13,7 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 from exciton.benchmark_tensors import generate_f_tensor, generate_v_tensor
-from block_encoding.exciton_hamiltonian_encoding import build_exciton_hamiltonian_block_encoding
+from integrations.qualtran.block_encoding.exciton_hamiltonian_encoding import build_exciton_hamiltonian_block_encoding
 from qualtran.resource_counting import GateCounts, QECGatesCost, get_cost_value
 from qualtran.surface_code import CCZ2TFactory, MultiFactory, SimpleDataBlock
 from qualtran.surface_code.gidney_fowler_model import get_ccz2t_costs
