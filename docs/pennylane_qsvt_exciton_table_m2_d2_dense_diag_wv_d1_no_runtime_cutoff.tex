@@ -1,0 +1,17 @@
+\begin{table}[t]
+\centering
+\scriptsize
+\caption{QSVT-style exciton costs with independent $L_c$ and $d$, $m = 2$, $D = 2$. Settings: $F$ unchanged with $R_{\mathrm{loc}}^F = 1$; $W$ and $V$ use dense-diagonal data with $R_c = R_{\mathrm{loc}} = 0$ (entry-oracle tensor is dense over $(i, j)$ of size $L_c^D \times L_c^D$, with singleton locality axes). Random seed=12345. Filtered to logical qubits $\leq 200$ and $d \leq 1$, with no QSVT runtime cutoff.}
+\begin{tabularx}{\linewidth}{rrrrrrrrr}
+\toprule
+$L_c$ & $d$ & logical & ancilla & single Toffoli & single $T$ & single Cliff & QSVT Toffoli & QSVT $T$ & QSVT runtime [h] \\
+\midrule
+2 & 1 & 44 & 36 & 1611276 & 11348596 & 14054652 & 1611346 & 11348596 & 0.076 \\
+4 & 1 & 57 & 41 & 255893668 & 1795014564 & 2226239732 & 255893748 & 1795014564 & 8.340 \\
+8 & 1 & 76 & 52 & -- & -- & -- & -- & -- & -- \\
+16 & 1 & 95 & 63 & -- & -- & -- & -- & -- & -- \\
+32 & 1 & 114 & 74 & -- & -- & -- & -- & -- & -- \\
+64 & 1 & 133 & 85 & -- & -- & -- & -- & -- & -- \\
+\bottomrule
+\end{tabularx}
+\end{table}

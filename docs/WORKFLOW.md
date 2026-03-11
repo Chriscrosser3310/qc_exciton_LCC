@@ -2,6 +2,26 @@
 
 This document records the practical workflow for this repository so you can run and extend it later.
 
+## 0. Open Local Paths From Rewritten Links
+
+If a local path is rewritten to a URL like:
+
+`https://file+.vscode-resource.vscode-cdn.net/c%3A/Users/.../file.py`
+
+use:
+
+```powershell
+.\scripts\open_local_link.ps1 "https://file+.vscode-resource.vscode-cdn.net/c%3A/Users/name/project/src/app.ts#L10"
+```
+
+Options:
+
+```powershell
+.\scripts\open_local_link.ps1 "<link>" -Editor cursor
+.\scripts\open_local_link.ps1 "<link>" -Editor code
+.\scripts\open_local_link.ps1 "<link>" -Editor none   # just print normalized path
+```
+
 ## 1. Environment Workflow (Windows + WSL)
 
 PySCF support is handled in Linux (WSL), while editing can stay in Windows.
