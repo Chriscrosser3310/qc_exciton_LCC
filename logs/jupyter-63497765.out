@@ -1,0 +1,13 @@
+Compute node: hpc-35-36.cm.cluster
+Port: 8888
+Workdir: /home/jchen9/qc_exciton_LCC
+Python: /usr/bin/python
+Python 3.9.21
+Checking Jupyter dependencies...
+pygments OK 2.20.0
+IPython OK 8.18.1
+ipykernel OK 6.31.0
+jupyterlab OK 4.4.6
+
+Starting Jupyter Lab...
+

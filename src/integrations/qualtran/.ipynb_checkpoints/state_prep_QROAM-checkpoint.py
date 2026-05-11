@@ -1,0 +1,696 @@
+#  Copyright 2023 Google LLC
+#
+#  Licensed under the Apache License, Version 2.0 (the "License");
+#  you may not use this file except in compliance with the License.
+#  You may obtain a copy of the License at
+#
+#      https://www.apache.org/licenses/LICENSE-2.0
+#
+#  Unless required by applicable law or agreed to in writing, software
+#  distributed under the License is distributed on an "AS IS" BASIS,
+#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#  See the License for the specific language governing permissions and
+#  limitations under the License.
+
+r"""Controlled State preparation.
+
+This algorithm prepares a state $|\psi\rangle$ in a register initially at $|0\rangle$ by using
+rotations $R_y$ for encoding amplitudes and $R_z$ for encoding phases.
+
+Assume one wants to prepare the amplitude of a one qubit state
+
+$$
+\sqrt{p_0} |0\rangle + \sqrt{p_1} |1\rangle.
+$$
+
+This can be achieved by a rotation $R_y(\theta)$ where $\theta = \cos^{-1}(\sqrt{p_0})$.
+For encoding the amplitude of a n-qubit quantum state one could use a similar approach to this, but
+chaining conditional probabilities: first rotate qubit 1 by $\theta = \cos^{-1}(\sqrt{p_0})$, then
+the second qubit by $\theta_0 = \cos^{-1}(\sqrt{p_{00}/p_{0}})$, conditioned on the first one being
+in $|0\rangle$ and $\theta_1 = \cos^{-1}(\sqrt{p_{10}/p_{1}})$ conditioned by the first being in
+$|1\rangle$, and so on. Here $p_y$ means the probability that the first len(y) qubits of the
+original state are in the state $y$. Refer to equation (8) of [1] for the details.
+
+This general scheme is handled by StatePreparationViaQROAMRotations. This class also uses
+RotationTree to get the angles of rotation needed (which are converted to the value to be loaded
+to the ROM to achieve such a rotation). RotationTree is a tree data structure which holds the
+accumulated probability of each substring, i.e., the root holds the probability of measuring the
+first qubit at 0, the branch1 node the probability of measuring the second qubit at 0 if the first
+was measured at 1 and so on. The $2^i$ rotations needed to prepare the ith qubit are performed by
+PRGAViaPhaseGradientQROAM. This essentially is a rotation gate array, that is, given a list of
+angles it performs the kth rotation when the selection register is on state $|k\rangle$. This
+rotation is done in the Z axis, but for encoding amplitude a rotation around Ry is needed, thus the
+need of a $R_x(\pm \pi/2)$ gate before and after encoding the amplitudes of each qubit.
+
+In order to perform the rotations as efficiently as possible, the angles are loaded into a register
+(rot\_reg) which is added into a phase gradient. Then phase kickback causes an overall offset of
+$e^{i2\pi x/2^b}$, where $x$ is the angle value loaded and $b$ the size of the rot\_reg. Below is an
+example for rot\_reg\_size=2.
+
+First there is the rot\_reg register with the value to be rotated (3 in this case) and the phase
+gradient
+
+$$
+|3\rangle(e^{2\pi i 0/4}|0\rangle + e^{2\pi i 1/4}|1\rangle +
+          e^{2\pi i 2/4}|2\rangle + e^{2\pi i 3/4}|3\rangle).
+$$
+
+Then the rot\_reg $|3\rangle$ register is added to the phase gradient and store the result in the
+phase gradient register
+
+$$
+|3\rangle(e^{2\pi i 0/4}|3\rangle + e^{2\pi i 1/4}|0\rangle +
+          e^{2\pi i 2/4}|1\rangle + e^{2\pi i 3/4}|2\rangle),
+$$
+
+but this is equivalent to the original state with a phase offset of $e^{2\pi i 1/4}$.
+
+
+References:
+    [Trading T-gates for dirty qubits in state preparation and unitary synthesis]
+    (https://arxiv.org/abs/1812.00954).
+        Low, Kliuchnikov, Schaeffer. 2018.
+
+"""
+
+from collections import Counter
+from typing import cast, Dict, Iterable, List, Optional, Tuple, TYPE_CHECKING, Union
+
+import attrs
+import numpy as np
+import sympy
+from numpy.typing import NDArray
+
+from qualtran import (
+    Bloq,
+    bloq_example,
+    BloqBuilder,
+    BloqDocSpec,
+    DecomposeTypeError,
+    GateWithRegisters,
+    Signature,
+    Soquet,
+    SoquetT,
+)
+from qualtran.bloqs.basic_gates import XGate
+from qualtran.bloqs.basic_gates.rotation import Rx
+from qualtran.bloqs.data_loading.qroam_clean import QROAMClean, QROAMCleanAdjoint
+from qualtran.bloqs.rotations.phase_gradient import AddIntoPhaseGrad
+from qualtran.symbolics import bit_length, HasLength, is_symbolic, Shaped, slen, SymbolicInt
+
+if TYPE_CHECKING:
+    from qualtran.resource_counting import BloqCountDictT, SympySymbolAllocator
+
+
+def _to_tuple_or_has_length(
+    x: Union[HasLength, Iterable[complex]]
+) -> Union[HasLength, Tuple[complex, ...]]:
+    if isinstance(x, HasLength):
+        return x
+    return tuple(x)
+
+
+def _to_tuple_or_none(
+    x: Optional[Union[SymbolicInt, Iterable[SymbolicInt]]],
+) -> Optional[Tuple[SymbolicInt, ...]]:
+    if x is None:
+        return None
+    if isinstance(x, (int, sympy.Basic, float)):
+        return (x,)
+    if isinstance(x, np.ndarray):
+        return tuple(x.tolist())
+    return tuple(x)
+
+
+def _cap_log_block_sizes(
+    log_block_sizes: Optional[Tuple[SymbolicInt, ...]], max_log_block_sizes: Tuple[SymbolicInt, ...]
+) -> Optional[Tuple[SymbolicInt, ...]]:
+    if log_block_sizes is None:
+        return None
+    if is_symbolic(*log_block_sizes, *max_log_block_sizes):
+        if is_symbolic(*max_log_block_sizes):
+            return tuple(sympy.sympify(log_block_size) for log_block_size in log_block_sizes)
+        return log_block_sizes
+    return tuple(
+        min(int(log_block_size), int(max_log_block_size))
+        for log_block_size, max_log_block_size in zip(log_block_sizes, max_log_block_sizes)
+    )
+
+
+@attrs.frozen
+class StatePreparationViaQROAMRotations(GateWithRegisters):
+    r"""Controlled state preparation without entangled residual using Ry and Rz rotations from [1].
+
+    Given a quantum state of which the list of coefficients $c_i$ is known
+    $$
+        |\psi \rangle = \sum_{i=0}^{N-1}c_{i}|i\rangle
+    $$
+    this gate prepares $|\psi\rangle$ from $|0\rangle$ conditioned by a control qubit
+    $$
+        U((|0\rangle + |1\rangle)|0\rangle) = |0\rangle |0\rangle + |1\rangle |\psi\rangle.
+    $$
+
+    Args:
+        phase_bitsize: size of the register that is used to store the rotation angles. Bigger values
+            increase the accuracy of the results.
+        state_coefficients: tuple of length 2^state_bitsizes that contains the complex coefficients of the state.
+        control_bitsize: number of qubits of the control register. Set to zero for an uncontrolled gate.
+        log_block_sizes: QROAM tradeoff parameter. The block sizes used by QROAM are
+            `2**log_block_sizes`. This is capped per rotation table so it does not exceed the
+            current table size.
+        adjoint_log_block_sizes: Optional tradeoff parameter for `QROAMCleanAdjoint`. If not set,
+            the adjoint uses its own default.
+
+    References:
+        [Trading T-gates for dirty qubits in state preparation and unitary synthesis](https://arxiv.org/abs/1812.00954).
+        Low, Kliuchnikov, Schaeffer. 2018.
+    """
+
+    state_coefficients: Union[HasLength, Tuple[complex, ...]] = attrs.field(
+        converter=_to_tuple_or_has_length
+    )
+    phase_bitsize: SymbolicInt
+    control_bitsize: int = 0
+    uncompute: bool = False
+    log_block_sizes: Optional[Tuple[SymbolicInt, ...]] = attrs.field(
+        default=None, converter=_to_tuple_or_none
+    )
+    adjoint_log_block_sizes: Optional[Tuple[SymbolicInt, ...]] = attrs.field(
+        default=None, converter=_to_tuple_or_none
+    )
+
+    @classmethod
+    def from_bitsize(
+        cls,
+        n_coeff: SymbolicInt,
+        phase_bitsize: SymbolicInt,
+        *,
+        control_bitsize: int = 0,
+        uncompute: bool = False,
+        log_block_sizes: Optional[Union[SymbolicInt, Iterable[SymbolicInt]]] = None,
+        adjoint_log_block_sizes: Optional[Union[SymbolicInt, Iterable[SymbolicInt]]] = None,
+    ) -> 'StatePreparationViaQROAMRotations':
+        """Build a dense, data-free state-preparation bloq for resource estimates.
+
+        `n_coeff` is the dense state-vector length. It must be a power of two for concrete values.
+        The resulting bloq has symbolic ROM data and supports call-graph/resource estimates, but it
+        cannot be decomposed into a concrete circuit without actual coefficients.
+        """
+        if not is_symbolic(n_coeff):
+            assert n_coeff == 2 ** bit_length(n_coeff - 1)
+        return cls(
+            state_coefficients=HasLength(n_coeff),
+            phase_bitsize=phase_bitsize,
+            control_bitsize=control_bitsize,
+            uncompute=uncompute,
+            log_block_sizes=log_block_sizes,
+            adjoint_log_block_sizes=adjoint_log_block_sizes,
+        )
+
+    def __attrs_post_init__(self):
+        # negative number of control bits is not allowed
+        assert self.control_bitsize >= 0
+        # the register to which the angle is written must be at least of size two
+        if not is_symbolic(self.phase_bitsize):
+            assert self.phase_bitsize > 1
+        n_coeff = slen(self.state_coefficients)
+        # a valid quantum state has a number of coefficients that is a power of two
+        if not is_symbolic(n_coeff):
+            assert n_coeff == 2**self.state_bitsize
+        if not isinstance(self.state_coefficients, tuple):
+            return
+        # a valid quantum state must have norm one
+        assert np.isclose(np.linalg.norm(self.state_coefficients), 1)
+
+    @property
+    def qroam_log_block_sizes(self) -> Optional[Tuple[SymbolicInt, ...]]:
+        return self.log_block_sizes
+
+    @property
+    def qroam_adjoint_log_block_sizes(self) -> Optional[Tuple[SymbolicInt, ...]]:
+        return self.adjoint_log_block_sizes
+
+    @property
+    def state_bitsize(self) -> SymbolicInt:
+        return bit_length(slen(self.state_coefficients) - 1)
+
+    @property
+    def n_coeff(self) -> SymbolicInt:
+        return slen(self.state_coefficients)
+
+    @property
+    def signature(self) -> Signature:
+        return Signature.build(
+            prepare_control=self.control_bitsize,
+            target_state=self.state_bitsize,
+            phase_gradient=self.phase_bitsize,
+        )
+
+    @property
+    def rotation_tree(self) -> 'RotationTree':
+        assert isinstance(self.state_coefficients, tuple) and isinstance(self.phase_bitsize, int)
+        return RotationTree(np.asarray(self.state_coefficients), self.phase_bitsize, self.uncompute)
+
+    @property
+    def prga_prepare_amplitude(self) -> List['PRGAViaPhaseGradientQROAM']:
+        if is_symbolic(self.state_coefficients, self.phase_bitsize):
+            if not is_symbolic(self.state_bitsize):
+                return [
+                    PRGAViaPhaseGradientQROAM(
+                        selection_bitsize=qi,
+                        phase_bitsize=self.phase_bitsize,
+                        rom_values=Shaped((2**qi,)),
+                        control_bitsize=self.control_bitsize + 1,
+                        log_block_sizes=self.qroam_log_block_sizes,
+                        adjoint_log_block_sizes=self.qroam_adjoint_log_block_sizes,
+                    )
+                    for qi in range(int(self.state_bitsize))
+                ]
+            raise DecomposeTypeError(
+                "exact dense QROAM amplitude-table resource estimates require a concrete "
+                "state bitsize; pass a concrete n_coeff to from_bitsize"
+            )
+        ret = []
+        ampl_rv, _ = self.rotation_tree.get_rom_vals()
+        for qi in range(int(self.state_bitsize)):
+            ctrl_rot_q = PRGAViaPhaseGradientQROAM(
+                selection_bitsize=qi,
+                phase_bitsize=self.phase_bitsize,
+                rom_values=tuple(ampl_rv[qi]),
+                control_bitsize=self.control_bitsize + 1,
+                log_block_sizes=self.qroam_log_block_sizes,
+                adjoint_log_block_sizes=self.qroam_adjoint_log_block_sizes,
+            )
+            ret.append(ctrl_rot_q)
+        return ret
+
+    @property
+    def prga_prepare_phases(self) -> 'PRGAViaPhaseGradientQROAM':
+        data_or_shape: Union[Shaped, Tuple[int, ...]] = (
+            Shaped((slen(self.state_coefficients),))
+            if is_symbolic(self.state_coefficients) or is_symbolic(self.phase_bitsize)
+            else tuple(self.rotation_tree.get_rom_vals()[1])
+        )
+        return PRGAViaPhaseGradientQROAM(
+            selection_bitsize=self.state_bitsize,
+            phase_bitsize=self.phase_bitsize,
+            rom_values=data_or_shape,
+            control_bitsize=self.control_bitsize + 1,
+            log_block_sizes=self.qroam_log_block_sizes,
+            adjoint_log_block_sizes=self.qroam_adjoint_log_block_sizes,
+        )
+
+    def build_composite_bloq(self, bb: BloqBuilder, **soqs: SoquetT) -> Dict[str, SoquetT]:
+        r"""Parameters:
+        * prepare_control: only if control_bitsize != 0
+        * target_state: register where the state is written
+        * phase_gradient: phase gradient state (will be left unaffected)
+        """
+        if is_symbolic(self.state_coefficients) or is_symbolic(self.phase_bitsize):
+            raise DecomposeTypeError(f"cannot decompose symbolic {self}")
+
+        if self.uncompute:
+            soqs = self._prepare_phases(bb, **soqs)
+            soqs = self._prepare_amplitudes(bb, **soqs)
+        else:
+            soqs = self._prepare_amplitudes(bb, **soqs)
+            soqs = self._prepare_phases(bb, **soqs)
+        return soqs
+
+    def build_call_graph(self, ssa: 'SympySymbolAllocator') -> 'BloqCountDictT':
+        ret: 'Counter[Bloq]' = Counter()
+        ret[Rx(angle=-np.pi / 2)] += self.state_bitsize
+        ret[Rx(angle=np.pi / 2)] += self.state_bitsize
+        ret[XGate()] += 2
+        ret[self.prga_prepare_phases] += 1
+        for bloq in self.prga_prepare_amplitude:
+            ret[bloq] += 1
+        return ret
+
+    def _prepare_amplitudes(self, bb: BloqBuilder, **soqs: SoquetT) -> Dict[str, SoquetT]:
+        r"""Parameters into soqs:
+        * prepare_control: only if control_bitsize != 0
+        * target_state: register where the state is written
+        * phase_gradient: phase gradient state (will be left unaffected)
+        """
+        state_qubits = bb.split(cast(Soquet, soqs.pop("target_state")))
+        ctrl_rot_bloqs = (
+            reversed(list(enumerate(self.prga_prepare_amplitude)))
+            if self.uncompute
+            else enumerate(self.prga_prepare_amplitude)
+        )
+        for qi, ctrl_rot_q in ctrl_rot_bloqs:
+            # for the normal gate loop from qubit 0 to state_bitsizes-1, if it is the adjoint
+            # then the process is run backwards with the opposite turn angles
+            state_qubits[qi] = bb.add(Rx(angle=np.pi / 2), q=state_qubits[qi])
+            if qi:
+                soqs["selection"] = bb.join(state_qubits[:qi])
+            if self.control_bitsize > 1:
+                soqs["control"] = bb.join(
+                    np.array(
+                        [*bb.split(cast(Soquet, soqs.pop("prepare_control"))), state_qubits[qi]]
+                    )
+                )
+            elif self.control_bitsize == 1:
+                soqs["control"] = bb.join(np.array([soqs.pop("prepare_control"), state_qubits[qi]]))
+            else:
+                soqs["control"] = state_qubits[qi]
+            soqs = bb.add_d(ctrl_rot_q, **soqs)
+            separated = bb.split(cast(Soquet, soqs.pop("control")))
+            if self.control_bitsize != 0:
+                soqs["prepare_control"] = bb.join(separated[:-1])
+            state_qubits[qi] = separated[-1]
+            if qi:
+                state_qubits[:qi] = bb.split(cast(Soquet, soqs.pop("selection")))
+            state_qubits[qi] = bb.add(Rx(angle=-np.pi / 2), q=state_qubits[qi])
+
+        soqs["target_state"] = bb.join(state_qubits)
+        return soqs
+
+    def _prepare_phases(self, bb: BloqBuilder, **soqs: SoquetT) -> Dict[str, SoquetT]:
+        """Encodes the phase of each coefficient.
+
+        Takes into account both the phase of the original coefficient and offsets caused by the
+        amplitude preparation.
+
+        It applies a rotation to the target_state register through phase kickback. By using
+        target_register as the selection register for rotating an ancilla qubit that is then
+        erased, leaving the desired phase in target_register.
+
+        Args:
+            rom_vals: list of ROM values that correspond to the angles of the phases to
+                be encoded. The ith item contain an integer approximation of the value of the
+                ith coefficient, that should be loaded via QROAM.
+            prepare_control: control qubit for the gate. Gate only takes effect when control is at |1>
+            target_state: register that holds the amplitudes of the state to be encoded. It is
+                used as the selection register for the ROM value to be loaded, thus for the
+                target_state |00>, the angle that corresponds to the phase of |00> is applied.
+            phase_gradient: phase gradient state used to apply the rotation, can be obtained from
+                the PhaseGradientState class. It is left unaffected and can be reused.
+        """
+        rot_ancilla = bb.allocate(1)
+        rot_ancilla = bb.add(XGate(), q=rot_ancilla)
+        if self.control_bitsize > 1:
+            soqs["control"] = bb.join(
+                np.array([*bb.split(cast(Soquet, soqs.pop("prepare_control"))), rot_ancilla])
+            )
+        elif self.control_bitsize == 1:
+            soqs["control"] = bb.join(np.array([soqs.pop("prepare_control"), rot_ancilla]))
+        else:
+            soqs["control"] = rot_ancilla
+        ctrl_rot = self.prga_prepare_phases
+        # rename some registers to make them compatible with PRGAViaPhaseGradientQROAM
+        if ctrl_rot.selection_bitsize:
+            soqs["selection"] = soqs.pop("target_state")
+        soqs = bb.add_d(ctrl_rot, **soqs)
+        if ctrl_rot.selection_bitsize:
+            soqs["target_state"] = soqs.pop("selection")
+        separated = bb.split(cast(Soquet, soqs.pop("control")))
+        if self.control_bitsize != 0:
+            soqs["prepare_control"] = bb.join(separated[:-1])
+        separated[-1] = bb.add(XGate(), q=separated[-1])
+        bb.free(separated[-1])
+        return soqs
+
+
+@bloq_example
+def _state_prep_via_qroam_rotation() -> StatePreparationViaQROAMRotations:
+    state_coefs = (
+        (-0.42677669529663675 - 0.1767766952966366j),
+        (0.17677669529663664 - 0.4267766952966367j),
+        (0.17677669529663675 - 0.1767766952966368j),
+        (0.07322330470336305 - 0.07322330470336309j),
+        (0.4267766952966366 - 0.17677669529663692j),
+        (0.42677669529663664 + 0.17677669529663675j),
+        (0.0732233047033631 + 0.17677669529663678j),
+        (-0.07322330470336308 - 0.17677669529663678j),
+    )
+    state_prep_via_qroam_rotation = StatePreparationViaQROAMRotations(
+        phase_bitsize=2, state_coefficients=state_coefs
+    )
+    return state_prep_via_qroam_rotation
+
+
+@bloq_example
+def _state_prep_via_qroam_rotation_symb() -> StatePreparationViaQROAMRotations:
+    from qualtran.symbolics import HasLength
+
+    n_state_coeff = sympy.Symbol("L")
+    phase_bitsize = sympy.Symbol(r"\text{phase_bitsize}")
+    state_prep_via_qroam_rotation_symb = StatePreparationViaQROAMRotations(
+        state_coefficients=HasLength(n_state_coeff), phase_bitsize=phase_bitsize
+    )
+    return state_prep_via_qroam_rotation_symb
+
+
+@bloq_example
+def _state_prep_via_qroam_rotation_symb_phasegrad() -> StatePreparationViaQROAMRotations:
+    state_coefs = (
+        (-0.42677669529663675 - 0.1767766952966366j),
+        (0.17677669529663664 - 0.4267766952966367j),
+        (0.17677669529663675 - 0.1767766952966368j),
+        (0.07322330470336305 - 0.07322330470336309j),
+        (0.4267766952966366 - 0.17677669529663692j),
+        (0.42677669529663664 + 0.17677669529663675j),
+        (0.0732233047033631 + 0.17677669529663678j),
+        (-0.07322330470336308 - 0.17677669529663678j),
+    )
+
+    phase_bitsize = sympy.Symbol(r"b_\text{grad}")
+    state_prep_via_qroam_rotation_symb_phasegrad = StatePreparationViaQROAMRotations(
+        state_coefficients=state_coefs, phase_bitsize=phase_bitsize
+    )
+    return state_prep_via_qroam_rotation_symb_phasegrad
+
+
+_STATE_PREP_VIA_QROAM_ROTATIONS_DOC = BloqDocSpec(
+    bloq_cls=StatePreparationViaQROAMRotations,
+    examples=(
+        _state_prep_via_qroam_rotation,
+        _state_prep_via_qroam_rotation_symb,
+        _state_prep_via_qroam_rotation_symb_phasegrad,
+    ),
+)
+
+
+@attrs.frozen
+class PRGAViaPhaseGradientQROAM(Bloq):
+    r"""Array of controlled rotations $Z^{\theta_i/2}$ for a list of angles $\theta$.
+
+    It uses phase kickback and thus needs a phase gradient state in order to work. This
+    state must be provided externally for efficiency, as it is unaffected and can thus be reused.
+    Refer to [1], section on arbitrary quantum state preparation on page 3.
+
+    Args:
+        selection_bitsize: number of qubits used for encoding the selection register of the QROAM, it
+            must be equal to $\lceil \log_2(l_{rv}) \rceil$, where $l_{rv}$ is the number of angles
+            provided.
+        phase_bitsize: size of the register that is used to store the rotation angles. Bigger values
+            increase the accuracy of the results.
+        rom_values: the tuple of values to be loaded in the QROAM, which correspond to the angle of
+            each rotation.
+        control_bitsize: number of qubits of the control register. Set to zero for an uncontrolled gate.
+        log_block_sizes: QROAM tradeoff parameter. The block sizes used by QROAM are
+            `2**log_block_sizes`.
+        adjoint_log_block_sizes: Optional tradeoff parameter for `QROAMCleanAdjoint`. If not set,
+            the adjoint uses its own default.
+
+    References:
+        [Trading T-gates for dirty qubits in state preparation and unitary synthesis](https://arxiv.org/abs/1812.00954).
+        Low, Kliuchnikov, Schaeffer. 2018.
+    """
+
+    selection_bitsize: SymbolicInt
+    phase_bitsize: SymbolicInt
+    rom_values: Union[Shaped, Tuple[int, ...]]
+    control_bitsize: SymbolicInt
+    log_block_sizes: Optional[Tuple[SymbolicInt, ...]] = attrs.field(
+        default=None, converter=_to_tuple_or_none
+    )
+    adjoint_log_block_sizes: Optional[Tuple[SymbolicInt, ...]] = attrs.field(
+        default=None, converter=_to_tuple_or_none
+    )
+
+    @property
+    def qroam_log_block_sizes(self) -> Optional[Tuple[SymbolicInt, ...]]:
+        return _cap_log_block_sizes(self.log_block_sizes, (self.selection_bitsize,))
+
+    @property
+    def qroam_adjoint_log_block_sizes(self) -> Optional[Tuple[SymbolicInt, ...]]:
+        return _cap_log_block_sizes(self.adjoint_log_block_sizes, (self.selection_bitsize,))
+
+    @property
+    def signature(self) -> Signature:
+        return Signature.build(
+            control=self.control_bitsize,
+            selection=self.selection_bitsize,
+            phase_gradient=self.phase_bitsize,
+        )
+
+    @property
+    def qroam_bloq(self) -> QROAMClean:
+        return QROAMClean(
+            (self.rom_values,),
+            selection_bitsizes=(self.selection_bitsize,),
+            target_bitsizes=(self.phase_bitsize,),
+            target_shapes=((),),
+            num_controls=self.control_bitsize,
+        ).with_log_block_sizes(self.qroam_log_block_sizes)
+
+    @property
+    def qroam_adj_bloq(self) -> QROAMCleanAdjoint:
+        qroam = self.qroam_bloq
+        if qroam.has_data():
+            return QROAMCleanAdjoint.build_from_data(
+                *qroam.batched_data_permuted,
+                target_bitsizes=qroam.target_bitsizes,
+                target_shapes=(qroam.block_sizes,) * len(qroam.batched_data_permuted),
+                num_controls=qroam.num_controls,
+                log_block_sizes=self.qroam_adjoint_log_block_sizes,
+            )
+        return QROAMCleanAdjoint.build_from_bitsize(
+            qroam.data_shape,
+            target_bitsizes=qroam.target_bitsizes,
+            target_shapes=(qroam.block_sizes,) * len(qroam.target_bitsizes),
+            num_controls=qroam.num_controls,
+            log_block_sizes=self.qroam_adjoint_log_block_sizes,
+        )
+
+    @property
+    def add_into_phase_grad(self) -> AddIntoPhaseGrad:
+        return AddIntoPhaseGrad(self.phase_bitsize, self.phase_bitsize)
+
+    def build_composite_bloq(self, bb: BloqBuilder, **soqs: SoquetT) -> Dict[str, SoquetT]:
+        """Parameters:
+        * control
+        * selection (not necessary if selection_bitsize == 0)
+        * phase_gradient
+        """
+        phase_grad = soqs.pop("phase_gradient")
+        # load angles in rot_reg (line 1 of eq (8) in [1]); QROAM allocates the target
+        # and any junk registers, and its adjoint consumes them during uncomputation.
+        soqs = bb.add_d(self.qroam_bloq, **soqs)
+        # phase kickback via phase_grad += rot_reg (line 2 of eq (8) in [1])
+        soqs["target0_"], phase_grad = bb.add(
+            self.add_into_phase_grad, x=soqs["target0_"], phase_grad=phase_grad
+        )
+        block_sizes = cast(Tuple[int, ...], self.qroam_bloq.block_sizes)
+        for target, adj_target in zip(
+            self.qroam_bloq.target_registers, self.qroam_adj_bloq.target_registers
+        ):
+            junk_name = 'junk_' + target.name
+            junk_soqs = soqs.pop(junk_name) if junk_name in soqs else np.array([])
+            assert isinstance(junk_soqs, np.ndarray)
+            soqs[adj_target.name] = np.array([soqs.pop(target.name), *junk_soqs]).reshape(
+                block_sizes
+            )
+        # uncompute angle load in rot_reg using measurement-based QROAM uncomputation
+        # (line 1 of eq (8) in [1])
+        soqs = bb.add_d(self.qroam_adj_bloq, **soqs)
+        soqs["phase_gradient"] = phase_grad
+        return soqs
+
+    def build_call_graph(self, ssa: 'SympySymbolAllocator') -> 'BloqCountDictT':
+        ret: 'Counter[Bloq]' = Counter()
+        ret[self.qroam_bloq] += 1
+        ret[self.qroam_adj_bloq] += 1
+        ret[self.add_into_phase_grad] += 1
+        return ret
+
+    def __repr__(self):
+        return (
+            f'PRGAViaPhaseGradientQROAM('
+            f'selection_bitsize={self.selection_bitsize}, '
+            f'phase_bitsize={self.phase_bitsize}, '
+            f'num_rom_values={slen(self.rom_values)}, '
+            f'control_bitsize={self.control_bitsize}, '
+            f'log_block_sizes={self.qroam_log_block_sizes}, '
+            f'adjoint_log_block_sizes={self.qroam_adjoint_log_block_sizes}, )'
+        )
+
+
+class RotationTree:
+    r"""Used by `StatePreparationViaQROAMRotations` to get the corresponding rotation angles.
+
+    The rotation angles are used to encode the amplitude of a state using the method described in
+    [1], section on arbitrary quantum state preparation, page 3.
+
+    References:
+        [Trading T-gates for dirty qubits in state preparation and unitary synthesis]
+        (https://arxiv.org/abs/1812.00954).
+            Low, Kliuchnikov, Schaeffer. 2018.
+    """
+
+    def __init__(self, state: NDArray, phase_bitsize: int, uncompute: bool = False):
+        self.state_bitsize = (len(state) - 1).bit_length()
+        self._calc_amplitude_angles_and_rv(state, phase_bitsize, uncompute)
+        self._calc_phase_rom_values(state, phase_bitsize, uncompute)
+
+    def get_rom_vals(self) -> Tuple[List[List[int]], List[int]]:
+        return self.amplitude_rom_values, self.phase_rom_values
+
+    def _calc_amplitude_angles_and_rv(
+        self, state: NDArray, phase_bitsize: int, uncompute: bool
+    ) -> None:
+        r"""Gives a list of the ROM values to be loaded for preparing the amplitudes of a state.
+
+        The ith element of the returned list is another list with the rom values to be loaded when
+        preparing the amplitudes of the ith qubit for the given state.
+        """
+        slen = len(state)
+        self.sum_total = np.zeros(2 * slen)
+        for i in range(slen):
+            self.sum_total[i + slen] = abs(state[i]) ** 2
+        for i in range(slen - 1, 0, -1):
+            self.sum_total[i] = self.sum_total[i << 1] + self.sum_total[(i << 1) | 1]
+        self.amplitude_rom_values: List[List[int]] = []
+        for i in range(self.state_bitsize):
+            rom_vals_this_layer: List[int] = []
+            for node in range(1 << i, 1 << (i + 1)):
+                angle = self._angle_0(node)
+                if uncompute:
+                    angle = 2 * np.pi - angle
+                rom_val = RotationTree._angle_to_rom_value(angle, phase_bitsize)
+                rom_vals_this_layer.append(rom_val)
+            self.amplitude_rom_values.append(rom_vals_this_layer)
+
+    def _calc_phase_rom_values(self, state: NDArray, phase_bitsize: int, uncompute: bool) -> None:
+        """Computes the rom value to be loaded to get the phase for each coefficient of the state.
+
+        As we are using the equivalent to controlled Z to do the rotations instead of Rz, there
+        is a phase offset for each coefficient that has to be corrected. This offset is half of the
+        turn angle applied, and is added to the phase for each coefficient.
+        """
+        offsets = np.zeros(2**self.state_bitsize)
+        for i in range(self.state_bitsize):
+            rang = 2 ** (self.state_bitsize - i)
+            for j in range(2**i):
+                arv = self.amplitude_rom_values[i][j]
+                if uncompute:
+                    arv = -arv % 2**phase_bitsize
+                offsets[j * rang : (j + 1) * rang] += (np.pi * arv / (2**phase_bitsize)) % np.pi
+        angles = np.array([np.angle(c) for c in state])
+        # flip angle if uncompute
+        angles = [(1 - 2 * uncompute) * (a - o) for a, o in zip(angles, offsets)]
+        self.phase_rom_values: List[int] = [
+            RotationTree._angle_to_rom_value(a, phase_bitsize) for a in angles
+        ]
+
+    def _angle_0(self, idx: int) -> float:
+        r"""Angle that corresponds to p_0."""
+        return 2 * np.arccos(np.sqrt(self._p0(idx)))
+
+    def _p0(self, idx: int) -> float:
+        if self.sum_total[idx] == 0:
+            return 0
+        return self.sum_total[idx << 1] / self.sum_total[idx]
+
+    @staticmethod
+    def _angle_to_rom_value(angle: float, phase_bitsize: int) -> int:
+        r"""Given an angle, returns the value to be loaded in ROM.
+
+        Returns the value to be loaded to a QROAM to encode the given angle with a certain value of
+        phase_bitsize.
+        """
+        rom_value_decimal = 2**phase_bitsize * angle / (2 * np.pi)
+        return round(rom_value_decimal) % (2**phase_bitsize)

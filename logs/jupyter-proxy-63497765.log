@@ -1,0 +1,8 @@
+Proxy listening on 127.0.0.1:8891 -> hpc-35-36.cm.cluster:8888
+Traceback (most recent call last):
+  File "<stdin>", line 46, in <module>
+  File "/usr/lib64/python3.9/socket.py", line 856, in create_connection
+    raise err
+  File "/usr/lib64/python3.9/socket.py", line 844, in create_connection
+    sock.connect(sa)
+ConnectionRefusedError: [Errno 111] Connection refused
