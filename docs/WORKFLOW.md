@@ -1,182 +1,152 @@
 # Project Workflow Guide
 
-This document records the practical workflow for this repository so you can run and extend it later.
+This guide describes the workflow for the repository as it currently stands.
+The active work is concentrated in chemistry data generation and Qualtran
+resource-estimation experiments.
 
-## 0. Open Local Paths From Rewritten Links
+## 1. Repository Map
 
-If a local path is rewritten to a URL like:
+- `src/chem`: PySCF-backed quantum chemistry utilities.
+- `src/integrations/qualtran`: active Qualtran QROAM, state-preparation,
+  block-unitary, and data-loading resource-estimation code.
+- `src/integrations/pennylane`: removed from the active tree; archived in
+  `archive/src_integrations_pennylane_20260505_1600.tar.gz`.
+- `src/exciton`: early exciton containers and a minimal builder. This area is
+  not yet aligned with the current effective-Hamiltonian/block-encoding work.
+- `archive`: previous integration and adapter layers retained for reference.
+- `experiments`: older notebooks and scripts, some of which reference archived
+  modules.
+- `docs`: current summaries, generated reports, tables, and PDFs.
 
-`https://file+.vscode-resource.vscode-cdn.net/c%3A/Users/.../file.py`
+## 2. Environment Setup
 
-use:
-
-```powershell
-.\scripts\open_local_link.ps1 "https://file+.vscode-resource.vscode-cdn.net/c%3A/Users/name/project/src/app.ts#L10"
-```
-
-Options:
-
-```powershell
-.\scripts\open_local_link.ps1 "<link>" -Editor cursor
-.\scripts\open_local_link.ps1 "<link>" -Editor code
-.\scripts\open_local_link.ps1 "<link>" -Editor none   # just print normalized path
-```
-
-## 1. Environment Workflow (Windows + WSL)
-
-PySCF support is handled in Linux (WSL), while editing can stay in Windows.
-
-### One-time setup
-
-From PowerShell in the repo root:
-
-```powershell
-.\scripts\run_in_wsl.ps1 bootstrap
-```
-
-This does:
-- create `.venv-wsl` in the repo
-- install editable package and dependencies: `.[chem,dev,qiskit]`
-- install PySCF in WSL
-
-### Daily commands
-
-```powershell
-.\scripts\run_in_wsl.ps1 test
-.\scripts\run_in_wsl.ps1 example
-.\scripts\run_in_wsl.ps1 mos2
-.\scripts\run_in_wsl.ps1 cmd python -m pytest -q
-```
-
-## 1B. Environment Workflow (Native Ubuntu)
-
-On your Ubuntu machine:
+Base install:
 
 ```bash
-git clone https://github.com/Chriscrosser3310/qc_exciton_LCC.git
-cd qc_exciton_LCC
+python -m pip install -e .
+```
+
+Install optional groups as needed:
+
+```bash
+python -m pip install -e '.[chem]'
+python -m pip install -e '.[qualtran]'
+python -m pip install -e '.[dev]'
+```
+
+For PySCF work, prefer Linux or WSL. Existing helper scripts are still useful:
+
+```bash
 bash ./scripts/linux/bootstrap.sh
 bash ./scripts/linux/run.sh test
 bash ./scripts/linux/run.sh mos2
 ```
 
-Custom command in the same venv:
-
-```bash
-bash ./scripts/linux/run.sh cmd python -m pytest -q
-```
-
-Notes:
-- default Linux venv path is `.venv-linux`
-- you can override with `VENV_DIR=/path/to/venv`
-
-## 2. Chemistry -> LMO -> Integrals Workflow
-
-Main module: [src/chem/pyscf_adapter.py](../src/chem/pyscf_adapter.py)
-
-### Step A: Build molecule (MoS2)
-
-Use:
-- `build_mos2_molecule(...)`
-
-Current default is a triatomic molecular MoS2 geometry.
-
-### Step B: SCF
-
-Use:
-- `run_scf(mol, method="RHF"|"UHF"|"RKS"|"UKS", xc="PBE")`
-
-Output is a converged PySCF mean-field object (`mf`).
-
-### Step C: Localize orbitals
-
-Use:
-- `localize_orbitals(mol, mo_coeff, mo_occ, scheme="boys"|"pipek-mezey")`
-
-Design choice:
-- occupied and virtual spaces are localized separately
-- final LMO coefficient matrix is `[C_occ_loc | C_vir_loc]`
-- returned `occupied` / `virtual` indices are in this reordered LMO basis
-
-### Step D: LMO integrals
-
-Use:
-- `compute_one_electron_integrals_lmo(mf, lmo_coeff)` -> `(hcore_lmo, fock_lmo)`
-- `compute_two_electron_integrals_lmo(mol, lmo_coeff)` -> `eri_lmo[p,q,r,s]`
-
-### Step E: Static screening
-
-Use:
-- `compute_static_screened_coulomb_lmo(eri_lmo, epsilon_r, orbital_centers=None, kappa=None)`
-
-Model:
-- base: `W = eri / epsilon_r`
-- optional damping: `exp(-kappa * (d_pr + d_qs)/2)` using LMO centers
-
-Helper:
-- `compute_orbital_centers(mol, lmo_coeff)` for center coordinates.
-
-### Step F: One-shot builder
-
-Use:
-- `PySCFExcitonDataBuilder.build(...)`
-
-This returns `LMOData` with:
-- `mo_coeff`, `lmo_coeff`
-- `hcore_lmo`, `fock_lmo`, `eri_lmo`
-- `orbital_centers`
-- `occupied`, `virtual`
-
-## 3. Example You Can Re-run
-
-Example script: [examples/mos2_lmo_workflow.py](../examples/mos2_lmo_workflow.py)
-
-Run from PowerShell:
+From Windows PowerShell:
 
 ```powershell
+.\scripts\run_in_wsl.ps1 bootstrap
+.\scripts\run_in_wsl.ps1 test
 .\scripts\run_in_wsl.ps1 mos2
 ```
 
-Expected outputs include:
-- number of LMOs
-- shapes of `hcore_lmo` and `eri_lmo`
-- sample screened element `W(0,0,0,0)`
+## 3. Chemistry -> LMO Data
 
-## 4. Sparse Block-Encoding Workflow
+Main module: `src/chem/pyscf_adapter.py`
 
-Main module: [src/block_encoding/sparse_matrix.py](../src/block_encoding/sparse_matrix.py)
+The intended flow is:
 
-### Current structure
+1. Build or provide a PySCF molecule.
+2. Run SCF with `run_scf`.
+3. Localize occupied and virtual orbital spaces separately with
+   `localize_orbitals`.
+4. Transform one-electron and two-electron quantities into the LMO basis with
+   `compute_one_electron_integrals_lmo` and
+   `compute_two_electron_integrals_lmo`.
+5. Estimate LMO centers with `compute_orbital_centers`.
+6. Build a simple screened Coulomb tensor with
+   `compute_static_screened_coulomb_lmo`.
 
-- `RowAccessOracle.from_function(...)`
-- `ColAccessOracle.from_function(...)`
-- `EntryBinaryOracle.from_function(...)` / `from_dense(...)`
-- `FullDataLoadingAmplitudeOracle(...)`
-- `SparseOracleBundle.from_functions(...)`
-- `SparseMatrixBlockEncoding(...)`
+The one-shot helper `PySCFExcitonDataBuilder.build(...)` returns `LMOData` with:
 
-### Reversible compilation + costs
+- molecular orbital coefficients
+- localized orbital coefficients
+- hcore and Fock matrices in the LMO basis
+- four-index LMO electron-repulsion integrals
+- orbital centers
+- occupied and virtual index partitions in the reordered LMO basis
 
-Legacy oracle-synthesis utilities have been archived under:
-- `archive/non_qualtran_core/src/oracles/`
+Example script:
 
-Active oracle/block-encoding development is integration-specific:
-- Qualtran: `src/integrations/qualtran/block_encoding/`
-- PennyLane: `src/integrations/pennylane/`
+```bash
+bash ./scripts/linux/run.sh mos2
+```
 
-## 5. Recommended Iteration Loop
+## 4. Qualtran Resource Estimation
 
-1. Edit code in Windows.
-2. Run tests in WSL:
-   - `.\scripts\run_in_wsl.ps1 test`
-3. Run MoS2 chemistry flow:
-   - `.\scripts\run_in_wsl.ps1 mos2`
-4. Add/adjust block-encoding logic and estimate costs.
-5. Commit once tests and examples are stable.
+Main directory: `src/integrations/qualtran`
 
-## 6. Known Conventions
+The current Qualtran code is integration-specific. It is not a stable package
+API yet, but the active files are:
 
-- Source layout is integration-first under `src/integrations/<provider>/...`.
-- Core chemistry/exciton utilities remain under `src/chem` and `src/exciton`.
-- Do not reintroduce archived adapter-agnostic paths from `archive/legacy_adapter_layer/`.
-- Use WSL runner scripts for anything requiring PySCF.
+- `state_prep_QROAM.py`: QROAM-backed controlled dense state preparation using
+  phase-gradient rotations.
+- `block_state_preparation_QROAM.py`: block-indexed extension that loads
+  rotation data conditioned on a block register.
+- `unitary_synthesis_QROAM.py`: Householder-reflection unitary synthesis based
+  on QROAM-backed state preparation.
+- `block_unitary_synthesis_QROAM.py`: block-diagonal unitary synthesis from
+  block-indexed Householder reflections.
+- `data_loading_comparison.py` and `data_loading_comparison.ipynb`: shape-only
+  comparison of QROM, SelectSwapQROM, and QROAMClean for data loading plus
+  data-register-controlled rotations.
+- `utils.py`: local helper functions for Qualtran Toffoli-style, qubit, and
+  ancilla counts.
+
+For notebook or plotting validation on headless systems, set a writable
+Matplotlib config directory:
+
+```bash
+MPLCONFIGDIR=/tmp/matplotlib python src/integrations/qualtran/data_loading_comparison.py
+```
+
+## 5. Reports and Generated Outputs
+
+Recent generated report material lives in `docs/`, including:
+
+- `docs/qualtran_block_prep_report.md`
+- `docs/qualtran_block_prep_operations_report.md`
+- `docs/block_unitary_resource_report.pdf`
+- `docs/block_unitary_resource_report_b32.pdf`
+- `docs/block_unitary_interferometer_resource_report_b32.pdf`
+
+The script `scripts/block_unitary_resource_report.py` is used for block-unitary
+resource-report generation.
+
+## 6. Testing Notes
+
+The test suite is not currently consistent with the active source layout. Many
+tests still import modules from the deleted `src/integrations/pennylane` and
+older `src/integrations/qualtran/block_encoding` trees.
+
+Use focused validation while the layout is in transition:
+
+```bash
+python -m compileall src/chem src/exciton src/integrations/qualtran
+python -m pytest tests/test_pyscf_adapter_screening.py tests/test_screening.py
+```
+
+Qualtran validation usually requires the `qualtran` optional dependency and may
+also require matching the local Qualtran API version used when the notebooks
+were written.
+
+## 7. Development Conventions
+
+- Keep active chemistry work in `src/chem`.
+- Keep provider-specific resource-estimation code under `src/integrations`.
+- Treat `src/exciton` as experimental until its effective-Hamiltonian interface
+  is reconciled with the chemistry and block-encoding work.
+- Prefer shape-only Qualtran objects such as `qualtran.symbolics.Shaped` when
+  resource estimates do not require concrete ROM data.
+- Do not reintroduce archived adapter-agnostic paths unless there is a clear
+  migration plan and matching tests.
