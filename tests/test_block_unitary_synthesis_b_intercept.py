@@ -75,6 +75,9 @@ from qualtran.resource_counting import QECGatesCost, get_cost_value
 from integrations.qualtran.block_unitary_synthesis_QROAM import (
     BlockUnitarySynthesisQROAM,
 )
+from integrations.qualtran.model_resource_counts import (
+    SYNTHESIS_PER_REFLECTION_INTERCEPT,
+)
 
 
 # Reference per-reflection b=0 intercepts I_1(n_blocks, N).
@@ -148,6 +151,25 @@ def test_full_decomposition_holds():
                 expected = K * (slope * b + I_1)
                 got = _toffoli(n_blocks, N, b, K)
                 assert got == expected, (n_blocks, N, K, b, got, expected)
+
+
+def test_reference_table_matches_module_table():
+    """``REFERENCE`` and ``model_resource_counts.SYNTHESIS_PER_REFLECTION_INTERCEPT`` must agree exactly.
+
+    The two tables are intentionally maintained in sync — the module
+    table is the production lookup used by ``block_unitary_synthesis_toffoli``,
+    and ``REFERENCE`` is the Bloq-derived ground truth that
+    ``test_reference_intercept_table_matches`` re-pins against the
+    current Qualtran QROAMClean optimizer. Drift between the two would
+    mean either the production estimator silently disagrees with the
+    Bloq (a correctness bug) or that one side was updated without the
+    other (a maintenance bug). Either way, the failure should be loud.
+    """
+    assert REFERENCE == SYNTHESIS_PER_REFLECTION_INTERCEPT, (
+        "REFERENCE in this file and SYNTHESIS_PER_REFLECTION_INTERCEPT in "
+        "src/integrations/qualtran/model_resource_counts.py have drifted; "
+        "update both tables together"
+    )
 
 
 def test_intercept_positive_for_multiblock():

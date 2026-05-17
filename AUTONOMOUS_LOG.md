@@ -929,3 +929,64 @@ populate new grid points. The b-affineness, K-linearity, and
 ``log_block_sizes``-monotonicity tests from cycles 3–10 are the anchors a
 closed-form derivation must satisfy.
 === claude cycle ended: Sat May 16 cycle 12 ===
+=== claude cycle ended: Sat May 16 09:29:20 PM PDT 2026 ===
+=== claude cycle started: Sat May 16 09:30:20 PM PDT 2026 ===
+
+## Cycle 13 — 2026-05-16
+
+**Task selected:** A small consistency guard the prior cycles flagged
+but never implemented. Cycle 7's log noted that
+``REFERENCE`` (in ``tests/test_block_unitary_synthesis_b_intercept.py``)
+and ``SYNTHESIS_PER_REFLECTION_INTERCEPT`` (in
+``src/integrations/qualtran/model_resource_counts.py``) "stay synced;
+their equality remains an invariant a future auto-generation step could
+enforce." This cycle implements that enforcement in its simplest form
+— a direct equality test — so drift between the production lookup and
+the Bloq-derived reference table surfaces as a loud failure rather
+than silent disagreement between the analytic estimator and the bloq.
+
+Deferred the larger cycle-12 recommendation (deriving
+``SYNTHESIS_WORKSPACE_QUBITS`` in closed form from QROAMClean's
+optimizer) as it requires non-trivial new work; the small consistency
+guard is a faster way to harden the existing tabulated infrastructure.
+
+**Major changes:**
+- ``tests/test_block_unitary_synthesis_b_intercept.py``:
+  - Import ``SYNTHESIS_PER_REFLECTION_INTERCEPT`` from
+    ``integrations.qualtran.model_resource_counts``.
+  - New ``test_reference_table_matches_module_table`` asserts the two
+    49-entry tables are equal dicts. With ``test_reference_intercept_table_matches``
+    (which re-derives ``REFERENCE`` from the Bloq) this transitively
+    pins the production lookup against the bloq's current
+    ``QECGatesCost`` output.
+
+**Files changed:**
+- Modified: ``tests/test_block_unitary_synthesis_b_intercept.py``
+  (+1 test, 5→6)
+
+**Tests/checks run:**
+- ``PYTHONPATH=src python tests/test_block_unitary_synthesis_b_intercept.py``
+  → 6/6 passed.
+- ``PYTHONPATH=src python tests/test_model_resource_counts.py``
+  → 29/29 passed (unaffected).
+
+**Achieved goal:** Closed the auto-generation gap the cycle-7 log
+flagged: the two intercept tables are now structurally guaranteed
+equal, so future grid extensions (the natural next step toward
+covering ``n_blocks > 64`` or ``N > 256``) cannot accidentally update
+one without the other (GOALS.md "Improve constant factors in quantum
+algorithms" / "Any potential improvements on the final Toffoli
+complexity/qubit counts/scaling").
+
+**Next recommended task:** Resume the cycle-12 recommendation —
+derive ``SYNTHESIS_WORKSPACE_QUBITS`` (or
+``SYNTHESIS_PER_REFLECTION_INTERCEPT``) in closed form from
+QROAMClean's optimizer expression (table length
+``M = n_blocks * n_rows``, output bitsize ``b``, optimal block size
+``k* ~ sqrt(M*b)``-style trade-off) plus the reflection-about-zero /
+Hadamard per-reflection overhead. The 245-point workspace table and
+49-point intercept table together form a comprehensive ground-truth
+fixture against which any candidate closed form can be checked, and
+the new equality guard ensures the production estimator stays in
+sync with whichever side ends up being the source of truth.
+=== claude cycle ended: Sat May 16 cycle 13 ===
