@@ -41,10 +41,12 @@ except ModuleNotFoundError:  # pragma: no cover - fallback for environments with
 
 from integrations.qualtran.model_resource_counts import (
     SYNTHESIS_PER_REFLECTION_INTERCEPT,
+    SynthesisResourceCount,
     assert_power_of_two,
     block_unitary_interferometer_count,
     block_unitary_interferometer_qubits,
     block_unitary_interferometer_toffoli,
+    block_unitary_synthesis_count,
     block_unitary_synthesis_signature_qubits,
     block_unitary_synthesis_toffoli,
     ceil_log2,
@@ -271,6 +273,37 @@ def test_block_unitary_synthesis_signature_qubits_matches_bloq():
                 block_unitary_synthesis_signature_qubits(n_blocks, N, b)
                 == bloq.signature.n_qubits()
             ), (n_blocks, N, b)
+
+
+def test_block_unitary_synthesis_count_composes_existing_estimators():
+    """``block_unitary_synthesis_count`` must compose the two analytic helpers."""
+    for n_blocks, n_rows, b, K in [
+        (1, 4, 2, 1),
+        (8, 16, 4, 4),
+        (64, 256, 32, 128),
+    ]:
+        rec = block_unitary_synthesis_count(n_blocks, n_rows, b, K)
+        assert isinstance(rec, SynthesisResourceCount)
+        assert rec.toffoli == block_unitary_synthesis_toffoli(n_blocks, n_rows, b, K)
+        assert rec.signature_qubits == block_unitary_synthesis_signature_qubits(
+            n_blocks, n_rows, b
+        )
+        assert (rec.n_blocks, rec.n_rows, rec.bitsize, rec.n_reflections) == (
+            n_blocks,
+            n_rows,
+            b,
+            K,
+        )
+
+
+def test_block_unitary_synthesis_count_propagates_validation():
+    """The wrapper must inherit input validation from its underlying helpers."""
+    with pytest.raises(ValueError):
+        block_unitary_synthesis_count(1, 3, 4, 1)  # n_rows not power of two
+    with pytest.raises(ValueError):
+        block_unitary_synthesis_count(1, 4, 0, 1)  # bitsize must be positive
+    with pytest.raises(KeyError):
+        block_unitary_synthesis_count(128, 4, 4, 1)  # off-grid intercept
 
 
 def test_optimal_log_block_sizes_returns_non_negative():

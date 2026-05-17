@@ -35,6 +35,24 @@ class ResourceCount:
 
 
 @dataclass(frozen=True)
+class SynthesisResourceCount:
+    """Analytic resource estimate for ``BlockUnitarySynthesisQROAM``.
+
+    ``signature_qubits`` is a strict lower bound on peak logical qubits: it
+    counts only the persistent ``block + reflection_ancilla + system +
+    phase_gradient`` registers and omits the transient QROAMClean workspace,
+    which is not yet modeled analytically.
+    """
+
+    toffoli: int
+    signature_qubits: int
+    n_blocks: int
+    n_rows: int
+    bitsize: int
+    n_reflections: int
+
+
+@dataclass(frozen=True)
 class PreviousReportPoint:
     """Reference values from the previous generated report, kept read-only here."""
 
@@ -155,6 +173,30 @@ def block_unitary_synthesis_signature_qubits(
     if bitsize <= 0:
         raise ValueError("bitsize must be positive")
     return ceil_log2(n_blocks) + 1 + int(math.log2(n_rows)) + bitsize
+
+
+def block_unitary_synthesis_count(
+    n_blocks: int,
+    n_rows: int,
+    bitsize: int,
+    n_reflections: int,
+) -> SynthesisResourceCount:
+    """Return the analytic Toffoli and signature-qubit estimate for the synthesis bloq.
+
+    Composes ``block_unitary_synthesis_toffoli`` and
+    ``block_unitary_synthesis_signature_qubits`` into a single record. The
+    qubit field is the persistent signature width and does not include the
+    transient QROAMClean workspace (see ``SynthesisResourceCount`` docstring).
+    """
+
+    return SynthesisResourceCount(
+        toffoli=block_unitary_synthesis_toffoli(n_blocks, n_rows, bitsize, n_reflections),
+        signature_qubits=block_unitary_synthesis_signature_qubits(n_blocks, n_rows, bitsize),
+        n_blocks=n_blocks,
+        n_rows=n_rows,
+        bitsize=bitsize,
+        n_reflections=n_reflections,
+    )
 
 
 def block_unitary_interferometer_toffoli(

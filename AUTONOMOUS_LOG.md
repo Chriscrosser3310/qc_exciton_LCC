@@ -588,3 +588,84 @@ resulting workspace table. Once that's in place,
 ``lambda_1, lambda_2`` — perhaps via a new ``SynthesisResourceCount``
 dataclass to keep the field semantics honest).
 === claude cycle ended: Sat May 16 cycle 8 ===
+=== claude cycle ended: Sat May 16 09:00:39 PM PDT 2026 ===
+=== claude cycle started: Sat May 16 09:01:39 PM PDT 2026 ===
+
+## Cycle 9 — 2026-05-16
+
+**Task selected:** Bundle the two existing analytic synthesis estimators
+(``block_unitary_synthesis_toffoli`` and
+``block_unitary_synthesis_signature_qubits``, pinned in cycles 5–8) into
+a single ``block_unitary_synthesis_count`` wrapper returning a
+``SynthesisResourceCount`` record. This is the natural composition of
+the two helpers and mirrors the ``block_unitary_interferometer_count``
+API shape that the interferometer side already exposes.
+
+**Pivot from cycle-8 recommendation:** Cycle 8 recommended next adding a
+QROAMClean workspace table by running Qualtran's ``QubitCount`` on
+``BlockUnitarySynthesisQROAM`` and subtracting the signature qubits.
+A direct probe revealed an upstream blocker: ``QubitCount`` raises
+``RuntimeError: tuple index out of range`` from
+``BlockPRGAViaPhaseGradientQROAM`` for many ``(n_blocks, N)`` cells
+(e.g. ``(2, 16)``, ``(4, 32)``, ``(8, 64)``), with sporadic non-monotone
+support. This means a clean workspace table cannot be tabulated this
+cycle without first investigating the upstream bug. Rather than block
+on that, this cycle takes the smaller composition step: it locks in the
+``ResourceCount``-shaped API the next-cycle work would need anyway, and
+documents the workspace gap explicitly in the ``SynthesisResourceCount``
+docstring so future work has a clear named place to extend.
+
+**Major changes:**
+- ``src/integrations/qualtran/model_resource_counts.py``:
+  - New ``SynthesisResourceCount`` frozen dataclass with fields
+    ``toffoli``, ``signature_qubits``, ``n_blocks``, ``n_rows``,
+    ``bitsize``, ``n_reflections``. Its docstring explicitly flags
+    ``signature_qubits`` as a strict lower bound and names the missing
+    transient QROAMClean workspace contribution.
+  - New ``block_unitary_synthesis_count(n_blocks, n_rows, bitsize,
+    n_reflections) -> SynthesisResourceCount`` wrapper composing the
+    two existing analytic helpers. Validation flows through unchanged.
+- ``tests/test_model_resource_counts.py`` (2 new tests, 21→23):
+  - ``test_block_unitary_synthesis_count_composes_existing_estimators``
+    — for three representative grid points, checks that the wrapper's
+    fields exactly equal the underlying helpers and that the parameter
+    fields round-trip.
+  - ``test_block_unitary_synthesis_count_propagates_validation`` —
+    confirms that the wrapper inherits ``ValueError`` on bad parameters
+    and ``KeyError`` on off-grid intercepts from the underlying helpers.
+
+**Files changed:**
+- Modified: ``src/integrations/qualtran/model_resource_counts.py``
+- Modified: ``tests/test_model_resource_counts.py`` (2 new tests)
+
+**Tests/checks run:**
+- ``PYTHONPATH=src python tests/test_model_resource_counts.py``
+  → 23/23 passed (was 21/21).
+- ``PYTHONPATH=src python tests/test_block_unitary_synthesis_b_intercept.py``
+  → 5/5 passed (unaffected).
+- ``PYTHONPATH=src python tests/test_block_unitary_synthesis_equivalence.py``
+  → 12/12 passed (unaffected).
+
+**Achieved goal:** Exposed a single composed analytic
+``block_unitary_synthesis_count`` entry point with a stable record-shaped
+return type, in line with the existing
+``block_unitary_interferometer_count`` API (GOALS.md "Improve constant
+factors in quantum algorithms" / "Any potential improvements on the
+final Toffoli complexity/qubit counts/scaling"). The wrapper is the
+shape a future ``_plot_report`` synthesis panel can pull from without
+having to wire two separate calls.
+
+**Next recommended task:** Investigate the upstream
+``BlockPRGAViaPhaseGradientQROAM`` ``QubitCount`` ``tuple index out of
+range`` failure that blocked the original cycle-8 next task. Repro at
+``n_blocks=2, N=16, b=4, K=1``. The fix likely lies in the bloq's
+``build_call_graph`` or signature shape — once ``QubitCount`` succeeds
+across the 49-point grid, ``SynthesisResourceCount`` can be extended
+with a ``workspace_qubits`` field tabulated against the bloq's
+``QubitCount - signature.n_qubits()``, completing the qubit-side
+analytic-vs-Bloq guard. If the upstream fix turns out to be
+non-trivial, a smaller fallback cycle would be adding a synthesis-bloq
+panel to the report PDF generator using only the lower-bound
+``signature_qubits`` and noting the workspace gap in the report
+summary page.
+=== claude cycle ended: Sat May 16 cycle 9 ===
