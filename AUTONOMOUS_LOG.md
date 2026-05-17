@@ -669,3 +669,109 @@ panel to the report PDF generator using only the lower-bound
 ``signature_qubits`` and noting the workspace gap in the report
 summary page.
 === claude cycle ended: Sat May 16 cycle 9 ===
+=== claude cycle ended: Sat May 16 09:09:35 PM PDT 2026 ===
+=== claude cycle started: Sat May 16 09:10:35 PM PDT 2026 ===
+
+## Cycle 10 — 2026-05-16
+
+**Task selected:** The cycle-9-recommended next task — investigate the
+upstream ``QubitCount`` failure that blocked the original cycle-8 plan
+to tabulate transient QROAMClean workspace qubits for
+``BlockUnitarySynthesisQROAM``. Cycle 9 reported failures at
+``(n_blocks=2, n_rows=16)``, ``(4, 32)``, ``(8, 64)`` with sporadic
+non-monotone support. A clean repro this cycle showed those grid
+points actually work today; the *real* failure mode is at any
+``n_blocks=1`` cell, with the error ``KeyError: 'block'`` from inside
+``BlockPrepareHouseholderStateQROAM.build_composite_bloq``.
+
+**Root cause:** ``block_bitsize = bit_length(n_blocks - 1)`` evaluates
+to ``0`` when ``n_blocks=1``. ``Signature.build(...)`` omits registers
+of bitsize 0, so the bloq's signature has *no* ``block`` slot.
+``QubitCount`` follows the bloq's ``build_composite_bloq`` path (rather
+than the ``build_call_graph`` path that ``QECGatesCost`` uses), and
+that decomposition unconditionally called ``soqs.pop("block")`` and
+then ``bb.add_d(self.state_prep, block=block, ...)``. Both fail when
+``block`` isn't in the signature. Note that the downstream
+``BlockStatePreparationViaQROAMRotations.signature`` already correctly
+omits ``block`` when ``n_blocks=1``, so the fix is fully local to
+``BlockPrepareHouseholderStateQROAM``.
+
+**Major changes:**
+- ``src/integrations/qualtran/block_unitary_synthesis_QROAM.py``:
+  - ``BlockPrepareHouseholderStateQROAM.build_composite_bloq`` now
+    pops ``block`` with a ``None`` default rather than required-key
+    semantics. The output dict adds the ``block`` soquet back only if
+    one was present.
+  - ``_apply_controlled_state_prep`` accepts ``block: Optional[Soquet]``
+    and forwards it to ``self.state_prep`` only when non-``None`` (via
+    a kwarg unpack), so the data-free single-block path now matches
+    the state-prep signature exactly.
+  - ``BlockHouseholderReflectionQROAM.build_composite_bloq`` was
+    unaffected — it threads soqs as ``**soqs`` and never refers to the
+    ``block`` key by name.
+- ``tests/test_block_unitary_synthesis_qubit_count.py`` (5 new tests):
+  - **Regression guard:** ``test_qubit_count_succeeds_for_single_block``
+    explicitly pins the ``n_blocks=1`` case that previously raised.
+  - **Full-grid coverage:** ``test_qubit_count_works_over_full_intercept_grid``
+    iterates the same 49-point grid covered by
+    ``SYNTHESIS_PER_REFLECTION_INTERCEPT`` and confirms ``QubitCount``
+    succeeds and returns at least the signature lower bound. Cross-checks
+    the bloq's signature width against the analytic
+    ``block_unitary_synthesis_signature_qubits`` for every grid point.
+  - **Qubit-side single-block equivalence:**
+    ``test_qubit_count_single_block_matches_unblocked`` — qubit-side
+    analog of the existing Toffoli single-block equivalence test;
+    ``BlockUnitarySynthesisQROAM(n_blocks=1)`` and
+    ``UnitarySynthesisQROAM`` agree on ``QubitCount`` at ``N=2,4,8``.
+  - **Monotonicity invariants:**
+    ``test_workspace_monotone_in_n_blocks`` and
+    ``test_workspace_monotone_in_n_rows`` pin the structural
+    requirement that QROAMClean workspace (= ``QubitCount`` minus
+    signature) is monotone non-decreasing in both ``n_blocks`` and
+    ``n_rows`` along the doubling sequence — a sanity check on future
+    QROAMClean optimizer changes.
+
+**Files changed:**
+- Modified: ``src/integrations/qualtran/block_unitary_synthesis_QROAM.py``
+- Added:    ``tests/test_block_unitary_synthesis_qubit_count.py`` (5 tests)
+- Modified: ``AUTONOMOUS_LOG.md``
+
+**Tests/checks run:**
+- ``PYTHONPATH=src python tests/test_block_unitary_synthesis_qubit_count.py``
+  → 5/5 passed.
+- ``PYTHONPATH=src python tests/test_block_unitary_synthesis_equivalence.py``
+  → 12/12 passed (unaffected — confirms the existing Toffoli
+  single-block equivalence still holds after the build_composite_bloq
+  refactor).
+- ``PYTHONPATH=src python tests/test_block_unitary_synthesis_scaling.py``
+  → 6/6 passed (unaffected).
+- ``PYTHONPATH=src python tests/test_block_unitary_synthesis_amortization.py``
+  → 5/5 passed (unaffected).
+- ``PYTHONPATH=src python tests/test_block_unitary_synthesis_b_intercept.py``
+  → 5/5 passed (unaffected — the intercept extraction at K=1 only
+  exercises the call-graph path, not the new decompose path).
+- ``PYTHONPATH=src python tests/test_model_resource_counts.py``
+  → 23/23 passed (unaffected).
+
+**Achieved goal:** Unblocked Qualtran's ``QubitCount`` across the full
+analytic 49-point ``(n_blocks, n_rows)`` grid for
+``BlockUnitarySynthesisQROAM`` (GOALS.md "Any potential improvements
+on the final Toffoli complexity/qubit counts/scaling"). The
+``SynthesisResourceCount.workspace_qubits`` field that cycle 9 had to
+defer can now be populated from the bloq directly. The signature path
+remains the load-bearing lower bound; the upstream blocker is gone.
+
+**Next recommended task:** With ``QubitCount`` now working over the
+full grid, populate the ``SynthesisResourceCount.workspace_qubits``
+field by tabulating
+``QubitCount(BlockUnitarySynthesisQROAM.from_shape(...))`` minus
+``signature.n_qubits()`` across the same 49-point grid (parameterized
+by ``bitsize`` too, since the QROAMClean optimizer's choice depends on
+``bitsize``). Add the resulting table to ``model_resource_counts.py``
+alongside ``SYNTHESIS_PER_REFLECTION_INTERCEPT``, extend
+``block_unitary_synthesis_count`` to return a ``workspace_qubits``
+field, and add a ``test_block_unitary_synthesis_workspace_matches_bloq``
+cross-check analogous to ``test_block_unitary_synthesis_toffoli_matches_bloq``.
+That closes the qubit-side analytic-vs-Bloq guard on the synthesis
+path, mirroring what the Toffoli side already has.
+=== claude cycle ended: Sat May 16 cycle 10 ===

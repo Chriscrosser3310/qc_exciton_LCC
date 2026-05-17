@@ -129,20 +129,21 @@ class BlockPrepareHouseholderStateQROAM(GateWithRegisters):
     def _apply_controlled_state_prep(
         self,
         bb: BloqBuilder,
-        block: Soquet,
+        block: Optional[Soquet],
         reflection_ancilla: Soquet,
         system: Soquet,
         phase_gradient: Soquet,
-    ) -> Tuple[Soquet, Soquet, Soquet, Soquet]:
+    ) -> Tuple[Optional[Soquet], Soquet, Soquet, Soquet]:
         reflection_ancilla = bb.add(XGate(), q=reflection_ancilla)
+        extra_soqs = {"block": block} if block is not None else {}
         out_soqs = bb.add_d(
             self.state_prep,
-            block=block,
+            **extra_soqs,
             prepare_control=reflection_ancilla,
             target_state=system,
             phase_gradient=phase_gradient,
         )
-        block = cast(Soquet, out_soqs["block"])
+        block = cast(Soquet, out_soqs["block"]) if block is not None else None
         reflection_ancilla = cast(Soquet, out_soqs["prepare_control"])
         system = cast(Soquet, out_soqs["target_state"])
         phase_gradient = cast(Soquet, out_soqs["phase_gradient"])
@@ -150,7 +151,8 @@ class BlockPrepareHouseholderStateQROAM(GateWithRegisters):
         return block, reflection_ancilla, system, phase_gradient
 
     def build_composite_bloq(self, bb: BloqBuilder, **soqs: SoquetT) -> Dict[str, SoquetT]:
-        block = soqs.pop("block")
+        # ``block`` is omitted from the signature when ``n_blocks == 1`` (block_bitsize=0).
+        block = soqs.pop("block", None)
         reflection_ancilla = soqs.pop("reflection_ancilla")
         system = soqs.pop("system")
         phase_gradient = soqs.pop("phase_gradient")
@@ -177,7 +179,8 @@ class BlockPrepareHouseholderStateQROAM(GateWithRegisters):
             )
             system_qubits = bb.split(system)
 
-        soqs["block"] = block
+        if block is not None:
+            soqs["block"] = block
         soqs["reflection_ancilla"] = reflection_ancilla
         soqs["system"] = bb.join(system_qubits)
         soqs["phase_gradient"] = phase_gradient
