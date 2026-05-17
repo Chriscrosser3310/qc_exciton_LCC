@@ -1,0 +1,218 @@
+"""Tests for the analytic interferometer resource model.
+
+These tests cover the pure-Python helpers in
+``integrations.qualtran.model_resource_counts`` and check that the
+shape-only Bloq estimator
+``estimate_interferometer_resources`` agrees with the closed-form
+``block_unitary_interferometer_count`` for matched parameters.
+"""
+
+from __future__ import annotations
+
+import sys
+
+try:
+    import pytest
+except ModuleNotFoundError:  # pragma: no cover - fallback for environments without pytest
+
+    class _Raises:
+        def __init__(self, exc):
+            self.exc = exc
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            if exc_type is None:
+                raise AssertionError(f"expected {self.exc.__name__}, got nothing")
+            return issubclass(exc_type, self.exc)
+
+    class _PytestShim:
+        @staticmethod
+        def raises(exc):
+            return _Raises(exc)
+
+        @staticmethod
+        def importorskip(name):
+            return __import__(name)
+
+    pytest = _PytestShim()  # type: ignore[assignment]
+    sys.modules["pytest"] = pytest  # type: ignore[assignment]
+
+from integrations.qualtran.model_resource_counts import (
+    assert_power_of_two,
+    block_unitary_interferometer_count,
+    block_unitary_interferometer_qubits,
+    block_unitary_interferometer_toffoli,
+    ceil_log2,
+    optimize_block_unitary_interferometer,
+)
+
+
+def test_ceil_log2_small_values():
+    assert ceil_log2(1) == 0
+    assert ceil_log2(2) == 1
+    assert ceil_log2(3) == 2
+    assert ceil_log2(4) == 2
+    assert ceil_log2(5) == 3
+    assert ceil_log2(8) == 3
+    assert ceil_log2(9) == 4
+
+
+def test_ceil_log2_rejects_non_positive():
+    with pytest.raises(ValueError):
+        ceil_log2(0)
+    with pytest.raises(ValueError):
+        ceil_log2(-1)
+
+
+def test_assert_power_of_two():
+    for x in (1, 2, 4, 8, 16, 1024):
+        assert_power_of_two(x, "x")  # should not raise
+    for bad in (0, 3, 5, 6, 7, 9, 12, -2):
+        with pytest.raises(ValueError):
+            assert_power_of_two(bad, "x")
+
+
+def test_block_unitary_interferometer_toffoli_minimal_case():
+    # K=1, N=2 (n=1), b=2, lambda_1=lambda_2=1:
+    #   layer_cost = ceil(2/2) + 2*1*2 - 5 = 0
+    #   shift_cost = max(0, -1)*(N-1) = 0
+    #   final_cost = ceil(2/1) + 1*2 + ceil(2/1) + 1 - 6 = 1
+    #   total      = N*layer + shift + final = 2*0 + 0 + 1 = 1
+    assert block_unitary_interferometer_toffoli(1, 2, 2, 1, 1) == 1
+
+
+def test_block_unitary_interferometer_toffoli_two_blocks():
+    # K=2, N=2, b=2, lambda_1=lambda_2=1:
+    #   layer_cost = ceil(4/2) + 4 - 5 = 1
+    #   final_cost = 4 + 2 + 4 + 1 - 6 = 5
+    #   total      = 2*1 + 0 + 5 = 7
+    assert block_unitary_interferometer_toffoli(2, 2, 2, 1, 1) == 7
+
+
+def test_block_unitary_interferometer_toffoli_n4():
+    # K=1, N=4 (n=2), b=2, lambda_1=lambda_2=1:
+    #   layer_cost = ceil(4/2) + 4 - 5 = 1
+    #   shift_cost = max(0, 0)*(N-1) = 0
+    #   final_cost = 4 + 2 + 4 + 1 - 6 = 5
+    #   total      = 4*1 + 0 + 5 = 9
+    assert block_unitary_interferometer_toffoli(1, 4, 2, 1, 1) == 9
+
+
+def test_block_unitary_interferometer_qubits_minimal_case():
+    # base = ceil_log2(1) + log2(2) + 2 = 0 + 1 + 2 = 3
+    # workspace = max(2*2*1, 2*1, 1) = 4
+    # total = 7
+    assert block_unitary_interferometer_qubits(1, 2, 2, 1, 1) == 7
+
+
+def test_block_unitary_interferometer_qubits_two_blocks():
+    # base = ceil_log2(2)+1+2 = 4
+    # workspace = max(4, 2, 1) = 4
+    assert block_unitary_interferometer_qubits(2, 2, 2, 1, 1) == 8
+
+
+def test_block_unitary_interferometer_count_rejects_non_power_of_two():
+    with pytest.raises(ValueError):
+        block_unitary_interferometer_count(1, 3, 2, 1, 1)  # block_dim
+    with pytest.raises(ValueError):
+        block_unitary_interferometer_count(1, 4, 2, 3, 1)  # lambda_1
+    with pytest.raises(ValueError):
+        block_unitary_interferometer_count(1, 4, 2, 1, 5)  # lambda_2
+
+
+def test_block_unitary_interferometer_count_returns_consistent_fields():
+    c = block_unitary_interferometer_count(8, 256, 32, 16, 16)
+    assert c.lambda_1 == 16
+    assert c.lambda_2 == 16
+    assert c.log_lambda_1 == 4
+    assert c.log_lambda_2 == 4
+    assert c.toffoli == block_unitary_interferometer_toffoli(8, 256, 32, 16, 16)
+    assert c.qubits == block_unitary_interferometer_qubits(8, 256, 32, 16, 16)
+
+
+def test_optimize_objective_orderings():
+    t_opt = optimize_block_unitary_interferometer(8, 256, 32, objective="toffoli")
+    q_opt = optimize_block_unitary_interferometer(8, 256, 32, objective="qubits")
+    # toffoli-opt must not be beaten on toffoli, qubit-opt must not be beaten on qubits
+    assert t_opt.toffoli <= q_opt.toffoli
+    assert q_opt.qubits <= t_opt.qubits
+
+
+def test_optimize_rejects_unknown_objective():
+    with pytest.raises(ValueError):
+        optimize_block_unitary_interferometer(1, 4, 2, objective="bogus")
+
+
+def test_optimize_chooses_powers_of_two():
+    res = optimize_block_unitary_interferometer(4, 16, 8, objective="toffoli")
+    assert res.lambda_1 == 1 << res.log_lambda_1
+    assert res.lambda_2 == 1 << res.log_lambda_2
+
+
+def test_estimator_matches_closed_form():
+    """The shape-only estimator and the closed-form count must agree."""
+    qualtran = pytest.importorskip("qualtran")
+    _ = qualtran  # silence linter
+    from integrations.qualtran.block_unitary_interferometer_QROAM import (
+        estimate_interferometer_resources,
+    )
+
+    # In the closed-form model lambda_1 = layer-load lambda = final-load lambda,
+    # and lambda_2 = final-erasure lambda. So we only compare with matched
+    # layer/final loads (l_layer == l_final) — the estimator splits them.
+    cases = [
+        (1, 32, 8, 0, 0),
+        (1, 32, 8, 3, 3),
+        (8, 256, 32, 4, 5),
+        (27, 256, 32, 5, 5),
+    ]
+    for n_blocks, n_rows, b, l_load, l_final_adj in cases:
+        est = estimate_interferometer_resources(
+            n_blocks,
+            n_rows,
+            b,
+            layer_log_block_size=l_load,
+            final_log_block_size=l_load,
+            final_adjoint_log_block_size=l_final_adj,
+        )
+        ref = block_unitary_interferometer_count(
+            n_blocks, n_rows, b, 1 << l_load, 1 << l_final_adj
+        )
+        assert est.toffoli == ref.toffoli, (n_blocks, n_rows, b, l_load, l_final_adj)
+        assert est.qubits == ref.qubits, (n_blocks, n_rows, b, l_load, l_final_adj)
+
+
+def test_optimal_log_block_sizes_returns_non_negative():
+    qualtran = pytest.importorskip("qualtran")
+    _ = qualtran
+    from integrations.qualtran.block_unitary_interferometer_QROAM import (
+        optimal_interferometer_log_block_sizes,
+    )
+
+    for n_blocks in (1, 8, 27):
+        l_layer, l_final = optimal_interferometer_log_block_sizes(n_blocks, 256, 32)
+        assert l_layer >= 0
+        assert l_final >= 0
+        assert l_layer == int(l_layer)
+        assert l_final == int(l_final)
+
+
+if __name__ == "__main__":
+    # Allow running without pytest installed: invoke every test_* function.
+    failed = 0
+    tests = [
+        (name, fn)
+        for name, fn in globals().items()
+        if name.startswith("test_") and callable(fn)
+    ]
+    for name, fn in tests:
+        try:
+            fn()
+            print(f"PASS {name}")
+        except Exception as e:  # noqa: BLE001
+            failed += 1
+            print(f"FAIL {name}: {type(e).__name__}: {e}")
+    print(f"{len(tests) - failed}/{len(tests)} passed")
+    sys.exit(0 if failed == 0 else 1)
