@@ -121,6 +121,22 @@ def test_workspace_formatter_roundtrip():
     assert parsed == sample
 
 
+def test_power_law_fit_recovers_quadratic():
+    alpha, coeff = rst._power_law_fit((1, 2, 4, 8), (3, 12, 48, 192))
+    assert abs(alpha - 2.0) < 1e-12
+    assert abs(coeff - 3.0) < 1e-12
+
+
+def test_scaling_summary_reports_canonical_fits():
+    summary = rst._format_scaling_summary(
+        SYNTHESIS_PER_REFLECTION_INTERCEPT,
+        SYNTHESIS_WORKSPACE_QUBITS,
+    )
+    assert "I_1(n_blocks, N=256)" in summary
+    assert "W(n_blocks, N=256, b=32)" in summary
+    assert "n_blocks^" in summary
+
+
 if __name__ == "__main__":
     failed = 0
     tests = [

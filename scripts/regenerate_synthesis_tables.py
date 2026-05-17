@@ -55,6 +55,8 @@ N_BLOCKS_GRID: tuple[int, ...] = (1, 2, 4, 8, 16, 32, 64)
 N_ROWS_GRID: tuple[int, ...] = (4, 8, 16, 32, 64, 128, 256)
 BITSIZE_GRID: tuple[int, ...] = (2, 4, 8, 16, 32)
 B_REF_FOR_INTERCEPT = 4
+SUMMARY_N_ROWS = 256
+SUMMARY_BITSIZE = 32
 
 
 def _build(n_blocks: int, n_rows: int, bitsize: int) -> BlockUnitarySynthesisQROAM:
@@ -165,6 +167,60 @@ def _check(
     return 1
 
 
+def _power_law_fit(xs: Sequence[int], ys: Sequence[int]) -> tuple[float, float]:
+    """Return ``(alpha, coeff)`` for ``ys ~= coeff * xs**alpha``."""
+
+    if len(xs) != len(ys):
+        raise ValueError("xs and ys must have equal length")
+    if len(xs) < 2:
+        raise ValueError("at least two points are required")
+    if any(x <= 0 for x in xs) or any(y <= 0 for y in ys):
+        raise ValueError("power-law fit requires positive x and y values")
+
+    log_xs = [math.log(x) for x in xs]
+    log_ys = [math.log(y) for y in ys]
+    mean_x = sum(log_xs) / len(log_xs)
+    mean_y = sum(log_ys) / len(log_ys)
+    denom = sum((x - mean_x) ** 2 for x in log_xs)
+    if denom == 0:
+        raise ValueError("x values must not all be equal")
+    alpha = sum((x - mean_x) * (y - mean_y) for x, y in zip(log_xs, log_ys)) / denom
+    coeff = math.exp(mean_y - alpha * mean_x)
+    return alpha, coeff
+
+
+def _format_scaling_summary(
+    intercept: dict[tuple[int, int], int],
+    workspace: dict[tuple[int, int, int], int] | None,
+    *,
+    n_rows: int = SUMMARY_N_ROWS,
+    bitsize: int = SUMMARY_BITSIZE,
+    n_blocks_grid: Sequence[int] = N_BLOCKS_GRID,
+) -> str:
+    """Summarize canonical-slice power-law fits for closed-form work."""
+
+    n_blocks = [nb for nb in n_blocks_grid if (nb, n_rows) in intercept]
+    intercept_values = [intercept[(nb, n_rows)] for nb in n_blocks]
+    alpha_i, coeff_i = _power_law_fit(n_blocks, intercept_values)
+    lines = [
+        "Scaling summary for canonical report slice:",
+        f"  I_1(n_blocks, N={n_rows}) ≈ {coeff_i:.6g} * n_blocks^{alpha_i:.6f}",
+    ]
+    if workspace is not None:
+        workspace_blocks = [
+            nb for nb in n_blocks_grid if (nb, n_rows, bitsize) in workspace
+        ]
+        workspace_values = [
+            workspace[(nb, n_rows, bitsize)] for nb in workspace_blocks
+        ]
+        alpha_w, coeff_w = _power_law_fit(workspace_blocks, workspace_values)
+        lines.append(
+            f"  W(n_blocks, N={n_rows}, b={bitsize}) ≈ "
+            f"{coeff_w:.6g} * n_blocks^{alpha_w:.6f}"
+        )
+    return "\n".join(lines)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -183,8 +239,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         action="store_true",
         help="Skip the (slower) workspace table; only regenerate the intercept table.",
     )
+    parser.add_argument(
+        "--summary",
+        action="store_true",
+        help=(
+            "Print canonical-slice power-law fits for I_1 and W. This is a "
+            "diagnostic aid for deriving closed-form table expressions."
+        ),
+    )
     args = parser.parse_args(list(argv) if argv is not None else None)
-    if not args.emit and not args.check:
+    if not args.emit and not args.check and not args.summary:
         args.check = True
 
     print(
@@ -213,6 +277,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         if workspace is not None:
             print()
             print(_format_workspace_table(workspace, N_BLOCKS_GRID, N_ROWS_GRID, BITSIZE_GRID))
+
+    if args.summary:
+        print()
+        print(_format_scaling_summary(intercept, workspace))
 
     return rc
 

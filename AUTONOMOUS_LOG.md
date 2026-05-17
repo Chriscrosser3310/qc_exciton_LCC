@@ -1393,3 +1393,82 @@ satisfying the inbox PDF requirement.
 ``I_1(n_blocks, n_rows)`` in closed form from QROAMClean optimizer
 behavior, using ``scripts/regenerate_synthesis_tables.py`` as the
 regression oracle for any candidate formula.
+=== codex cycle ended: Sat May 16 11:33:06 PM PDT 2026 ===
+=== codex cycle started: Sat May 16 11:34:06 PM PDT 2026 ===
+
+## Cycle 19 — 2026-05-16
+
+**Inbox:** AUTONOMOUS_INBOX.md asks for a PDF report each time, with
+math equations rendered as LaTeX. This cycle's PDF report is
+``docs/cycle_reports/cycle19_report.pdf``. Equations are rendered with
+matplotlib mathtext through ``scripts/autonomous_cycle_report.py``.
+
+**Goals already achieved:** Prior cycles have already closed the
+synthesis analytic-vs-Bloq Toffoli and qubit-count guard over the
+tabulated grid, added report-visible synthesis power-law fits, added
+``scripts/regenerate_synthesis_tables.py`` to regenerate tabulated
+intercept/workspace dicts from the Bloq, and added reusable
+math-rendered autonomous PDF reports.
+
+**Task selected:** Add a scaling-summary mode to
+``scripts/regenerate_synthesis_tables.py``. This is a small intermediate
+step toward the long-standing next task of deriving
+``I_1(n_blocks, n_rows)`` in closed form from QROAMClean optimizer
+behavior: the regeneration script can now print canonical log-log
+power-law fits for the shipped tables, giving a quick empirical target
+for candidate formulas.
+
+**Major changes:**
+- ``scripts/regenerate_synthesis_tables.py``:
+  - Added ``--summary`` to print canonical-slice power-law fits.
+  - Added ``_power_law_fit(xs, ys)`` implementing a log-log least-squares
+    fit ``y ~= c*x^alpha`` without new dependencies.
+  - Added ``_format_scaling_summary(...)`` reporting
+    ``I_1(n_blocks, N=256)`` and, when workspace was extracted,
+    ``W(n_blocks, N=256, b=32)`` fits.
+  - Preserved the existing default behavior: with no explicit mode, the
+    script still runs ``--check``.
+- ``tests/test_regenerate_synthesis_tables.py``:
+  - Added a pure test that recovers ``alpha=2`` and ``c=3`` from a
+    synthetic quadratic table.
+  - Added a summary-format test that confirms the canonical
+    ``I_1``/``W`` fit lines are emitted.
+- Generated this cycle's PDF at
+  ``docs/cycle_reports/cycle19_report.pdf``.
+
+**Files changed:**
+- Modified: ``scripts/regenerate_synthesis_tables.py``
+- Modified: ``tests/test_regenerate_synthesis_tables.py``
+- Added: ``docs/cycle_reports/cycle19_report.pdf``
+- Modified: ``AUTONOMOUS_LOG.md``
+
+**Tests/checks run:**
+- ``PYTHONPATH=src python tests/test_regenerate_synthesis_tables.py``
+  → 6/6 passed.
+- ``python -m py_compile scripts/regenerate_synthesis_tables.py tests/test_regenerate_synthesis_tables.py``
+  → passed.
+- ``PYTHONPATH=src python scripts/regenerate_synthesis_tables.py --no-workspace --summary``
+  → printed the canonical ``I_1(n_blocks, N=256)`` power-law fit.
+- ``python scripts/autonomous_cycle_report.py ... --cycle 19``
+  → wrote ``docs/cycle_reports/cycle19_report.pdf``.
+
+**Commit:** Attempted ``git add`` / commit, but staging was blocked by
+Git metadata write failure:
+``fatal: Unable to create '/resnick/home/jchen9/qc_exciton_LCC/.git/index.lock': Read-only file system``.
+Working tree changes were left intact.
+
+**Achieved goal:** Added a reusable empirical scaling diagnostic for
+the synthesis table closed-form derivation path, supporting GOALS.md
+"Improve constant factors in quantum algorithms" and "Any potential
+improvements on the final Toffoli complexity/qubit counts/scaling".
+
+**Achieved goal:** Satisfied the inbox requirement for this cycle by
+producing a PDF report with rendered LaTeX-style equations at
+``docs/cycle_reports/cycle19_report.pdf``.
+
+**Next recommended task:** Use the new ``--summary`` output while
+deriving ``I_1(n_blocks, n_rows)`` from the QROAMClean optimizer
+expression. The candidate closed form should be checked against
+``scripts/regenerate_synthesis_tables.py --check`` and the existing
+tabulated fixtures.
+=== codex cycle ended: Sat May 16 11:37:52 PM PDT 2026 ===
