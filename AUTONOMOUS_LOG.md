@@ -506,3 +506,85 @@ workspace which depends on the optimal block size at the chosen
 ``M = n_blocks * N``. The Bloq's ``log_block_sizes`` property exposes
 the optimizer's choice and could be queried for the per-row workspace.
 === claude cycle ended: Sat May 16 cycle 7 ===
+=== claude cycle ended: Sat May 16 08:56:00 PM PDT 2026 ===
+=== claude cycle started: Sat May 16 08:57:00 PM PDT 2026 ===
+
+## Cycle 8 — 2026-05-16
+
+**Task selected:** The cycle-7-recommended next task — begin the
+``block_unitary_synthesis_count`` wrapper by adding the analytic
+**signature qubit count** for ``BlockUnitarySynthesisQROAM``. This
+captures the persistent (input/output) register width
+``ceil_log2(n_blocks) + 1 + log2(n_rows) + bitsize`` exactly. The
+remaining piece — the transient QROAMClean workspace, which depends on
+the chosen ``log_block_sizes`` — is intentionally deferred to a later
+cycle since (a) it requires tabulating or deriving a non-trivial
+optimizer choice and (b) the signature qubit count is independently
+useful as a lower bound and as the base term of the eventual full
+``ResourceCount`` wrapper.
+
+**Major changes:**
+- ``src/integrations/qualtran/model_resource_counts.py``:
+  - New ``block_unitary_synthesis_signature_qubits(n_blocks, n_rows,
+    bitsize) -> int`` returning
+    ``ceil_log2(n_blocks) + 1 + log2(n_rows) + bitsize``. Validates
+    ``n_rows`` power-of-two, ``n_blocks > 0``, ``bitsize > 0``. Note:
+    unlike the Toffoli helper this does **not** require ``n_blocks`` to
+    be a power of two — ``ceil_log2`` already handles arbitrary
+    positive ``n_blocks`` and the bloq's ``block_bitsize`` follows
+    ``bit_length(n_blocks - 1)``.
+  - Docstring explicitly flags it as a lower bound (no QROAM workspace).
+- ``tests/test_model_resource_counts.py`` (3 new tests):
+  - ``test_block_unitary_synthesis_signature_qubits_validates_inputs``
+    — covers non-power-of-two ``n_rows`` rejection and the positivity
+    checks.
+  - ``test_block_unitary_synthesis_signature_qubits_formula`` — three
+    hand-checked points including a non-power-of-two ``n_blocks=3``
+    case.
+  - ``test_block_unitary_synthesis_signature_qubits_matches_bloq`` —
+    the load-bearing cross-check: for every entry of
+    ``SYNTHESIS_PER_REFLECTION_INTERCEPT`` and ``b ∈ {2, 8, 32}``, the
+    analytic count equals ``bloq.signature.n_qubits()`` exactly. This
+    is the signature-qubit-side analog of
+    ``test_block_unitary_synthesis_toffoli_matches_bloq``.
+
+**Files changed:**
+- Modified: ``src/integrations/qualtran/model_resource_counts.py``
+- Modified: ``tests/test_model_resource_counts.py`` (3 new tests, 18→21)
+
+**Tests/checks run:**
+- ``PYTHONPATH=src python tests/test_model_resource_counts.py``
+  → 21/21 passed (was 18/18 — added 3 signature-qubit tests).
+- ``PYTHONPATH=src python tests/test_block_unitary_synthesis_b_intercept.py``
+  → 5/5 passed (unaffected).
+- ``PYTHONPATH=src python tests/test_block_unitary_synthesis_scaling.py``
+  → 6/6 passed (unaffected).
+- ``PYTHONPATH=src python tests/test_block_unitary_synthesis_amortization.py``
+  → 5/5 passed (unaffected).
+
+**Achieved goal:** Pinned the analytic signature qubit count of
+``BlockUnitarySynthesisQROAM`` against the bloq's
+``signature.n_qubits()`` over the full 49-point ``(n_blocks, N) ∈
+{1,2,4,8,16,32,64} × {4,...,256}`` grid × three bitsizes (GOALS.md
+"Improve constant factors in quantum algorithms" / "Any potential
+improvements on the final Toffoli complexity/qubit counts/scaling").
+This closes the qubit-side base-term half of the eventual analytic
+``block_unitary_synthesis_count`` wrapper; the only remaining piece is
+the transient QROAMClean workspace contribution.
+
+**Next recommended task:** Tabulate the QROAMClean workspace
+contribution (peak transient qubits) for
+``BlockUnitarySynthesisQROAM`` at the
+``log_block_sizes`` choice the optimizer picks for each
+``(n_blocks, N, bitsize)`` grid point. The cleanest path is a Bloq-side
+extraction analogous to the ``I_1`` intercept extraction: run
+``QubitCount`` (or ``get_qubit_counts`` from
+``integrations.qualtran.utils``) on
+``BlockUnitarySynthesisQROAM.from_shape(...)`` at fixed
+``log_block_sizes``, subtract ``signature.n_qubits()``, and pin the
+resulting workspace table. Once that's in place,
+``block_unitary_synthesis_count`` can return a full
+``ResourceCount``-shaped record (with ``log_block_sizes`` replacing
+``lambda_1, lambda_2`` — perhaps via a new ``SynthesisResourceCount``
+dataclass to keep the field semantics honest).
+=== claude cycle ended: Sat May 16 cycle 8 ===

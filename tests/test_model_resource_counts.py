@@ -45,6 +45,7 @@ from integrations.qualtran.model_resource_counts import (
     block_unitary_interferometer_count,
     block_unitary_interferometer_qubits,
     block_unitary_interferometer_toffoli,
+    block_unitary_synthesis_signature_qubits,
     block_unitary_synthesis_toffoli,
     ceil_log2,
     optimize_block_unitary_interferometer,
@@ -233,6 +234,43 @@ def test_block_unitary_synthesis_toffoli_matches_bloq():
                 bloq_t = get_cost_value(bloq, QECGatesCost()).toffoli
                 analytic_t = block_unitary_synthesis_toffoli(n_blocks, N, b, K)
                 assert bloq_t == analytic_t, (n_blocks, N, b, K, bloq_t, analytic_t)
+
+
+def test_block_unitary_synthesis_signature_qubits_validates_inputs():
+    with pytest.raises(ValueError):
+        block_unitary_synthesis_signature_qubits(1, 3, 4)  # n_rows not power of two
+    with pytest.raises(ValueError):
+        block_unitary_synthesis_signature_qubits(0, 4, 4)  # n_blocks must be positive
+    with pytest.raises(ValueError):
+        block_unitary_synthesis_signature_qubits(1, 4, 0)  # bitsize must be positive
+
+
+def test_block_unitary_synthesis_signature_qubits_formula():
+    # ceil_log2(1) + 1 + log2(4) + 2 = 0 + 1 + 2 + 2 = 5
+    assert block_unitary_synthesis_signature_qubits(1, 4, 2) == 5
+    # ceil_log2(64) + 1 + log2(256) + 32 = 6 + 1 + 8 + 32 = 47
+    assert block_unitary_synthesis_signature_qubits(64, 256, 32) == 47
+    # n_blocks=3 (not a power of two) is allowed; ceil_log2(3) = 2
+    assert block_unitary_synthesis_signature_qubits(3, 8, 4) == 2 + 1 + 3 + 4
+
+
+def test_block_unitary_synthesis_signature_qubits_matches_bloq():
+    """Analytic signature qubit count must equal ``bloq.signature.n_qubits()``."""
+    qualtran = pytest.importorskip("qualtran")
+    _ = qualtran
+    from integrations.qualtran.block_unitary_synthesis_QROAM import (
+        BlockUnitarySynthesisQROAM,
+    )
+
+    for (n_blocks, N) in SYNTHESIS_PER_REFLECTION_INTERCEPT:
+        for b in (2, 8, 32):
+            bloq = BlockUnitarySynthesisQROAM.from_shape(
+                n_blocks=n_blocks, n_rows=N, phase_bitsize=b, n_reflections=1
+            )
+            assert (
+                block_unitary_synthesis_signature_qubits(n_blocks, N, b)
+                == bloq.signature.n_qubits()
+            ), (n_blocks, N, b)
 
 
 def test_optimal_log_block_sizes_returns_non_negative():

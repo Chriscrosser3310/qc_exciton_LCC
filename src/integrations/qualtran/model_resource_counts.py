@@ -135,6 +135,28 @@ def block_unitary_synthesis_toffoli(
     return n_reflections * (slope * bitsize + intercept)
 
 
+def block_unitary_synthesis_signature_qubits(
+    n_blocks: int,
+    n_rows: int,
+    bitsize: int,
+) -> int:
+    r"""Return the persistent (signature) qubit count for ``BlockUnitarySynthesisQROAM``.
+
+    The bloq's external signature consists of four registers:
+    ``block`` (``ceil_log2(n_blocks)`` qubits), ``reflection_ancilla`` (1 qubit),
+    ``system`` (``log2(n_rows)`` qubits), and ``phase_gradient`` (``bitsize`` qubits).
+    This is a lower bound on the peak qubit count; transient QROAMClean workspace
+    is not modeled here and depends on the chosen ``log_block_sizes``.
+    """
+
+    assert_power_of_two(n_rows, "n_rows")
+    if n_blocks <= 0:
+        raise ValueError("n_blocks must be positive")
+    if bitsize <= 0:
+        raise ValueError("bitsize must be positive")
+    return ceil_log2(n_blocks) + 1 + int(math.log2(n_rows)) + bitsize
+
+
 def block_unitary_interferometer_toffoli(
     num_blocks: int,
     block_dim: int,
