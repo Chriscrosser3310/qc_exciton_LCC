@@ -243,3 +243,102 @@ form against the existing identities would let
 to ``block_unitary_interferometer_count``, closing the modelling gap
 the cycle-3 plan called out.
 === claude cycle ended: Sat May 16 cycle 4 ===
+=== claude cycle ended: Sat May 16 08:00:37 PM PDT 2026 ===
+=== claude cycle started: Sat May 16 08:01:37 PM PDT 2026 ===
+
+## Cycle 5 — 2026-05-16
+
+**Task selected:** The cycle-4-recommended next task — pin the
+per-reflection ``b=0`` intercept of ``BlockUnitarySynthesisQROAM``'s
+Toffoli cost, completing the cost-decomposition anchor needed for an
+analytic estimator in ``model_resource_counts.py``.
+
+Cycles 1–4 established (Bloq-side, via ``QECGatesCost``):
+
+* K-linearity: ``T_total = K * T_per_reflection``
+* b-affineness: ``T_per_reflection(b)`` is exactly affine in ``b``
+* slope identity: per-reflection b-slope = ``2 * (log2(N) + 1)``,
+  independent of ``n_blocks``
+* ``n_blocks`` amortization in the QROAMClean ``sqrt(M)`` regime
+
+Together these *imply* the decomposition
+
+    T(n_blocks, N, K, b) = K * ( 2*(log2(N) + 1) * b + I_1(n_blocks, N) )
+
+but they leave ``I_1(n_blocks, N)`` — the b=0 intercept — unpinned.
+That intercept is the QROAMClean + ``QROAMCleanAdjoint`` data-loading
+cost plus the per-reflection Hadamard / reflection-about-zero
+overhead, and it is the missing piece a closed-form analytic
+``synthesis_count`` would need to predict.
+
+**Major changes:**
+- New ``tests/test_block_unitary_synthesis_b_intercept.py`` (5 tests):
+  - **Reference table:** Pins ``I_1(n_blocks, N)`` for the 15-point
+    grid ``n_blocks ∈ {1, 2, 4, 8, 16} × N ∈ {4, 8, 16}`` as a
+    hard-coded ``REFERENCE`` dict, analogous in role to
+    ``PREVIOUS_MATCHED_UNCOMPUTE_REPORT_ROWS256_COLS208`` in the
+    interferometer model. Any QROAMClean optimizer change that
+    perturbs these values now triggers an explicit test failure.
+  - **b-independence of intercept:** ``I_1`` extracted at
+    ``b ∈ {2, 3, 4, 5, 7, 11}`` agrees exactly — confirms the
+    decomposition is exactly (not approximately) affine in ``b``.
+  - **K-independence of intercept:** ``I_1`` extracted at
+    ``K ∈ {1, 2, N/2, N}`` agrees exactly — confirms the per-reflection
+    cost is exactly (not approximately) K-linear.
+  - **Full decomposition identity:** ``T == K * (2*(n+1)*b + I_1)``
+    across a ``(N, n_blocks, K, b)`` grid. This is the strongest
+    statement of the cost structure: if any future code change
+    invalidates the decomposition (e.g. introduces a non-affine
+    ``b`` dependence or breaks K-linearity), the failure will
+    point precisely at the ``(n_blocks, N, K, b)`` cell that broke.
+  - **Multi-block intercept positivity:** ``I_1(n_blocks >= 2, N) > 0``
+    for the reference grid. Makes explicit the assumption (used
+    implicitly by ``test_block_unitary_synthesis_amortization``) that
+    the QROAM contribution dominates per-reflection overhead in the
+    non-degenerate regime.
+
+- The reference intercept table is *load-bearing*: it is the only
+  remaining b=0-direction degree of freedom that an analytic estimator
+  must supply. The slope and decomposition structure are already
+  proven elsewhere.
+- The test file also runs as a script (no pytest required) and uses
+  ``importorskip("qualtran")`` so it skips cleanly if qualtran is
+  absent.
+
+**Files changed:**
+- Added: ``tests/test_block_unitary_synthesis_b_intercept.py`` (5 tests)
+- Updated: ``AUTONOMOUS_LOG.md``
+
+**Tests/checks run:**
+- ``PYTHONPATH=src python tests/test_block_unitary_synthesis_b_intercept.py``
+  → 5/5 passed.
+- ``PYTHONPATH=src python tests/test_block_unitary_synthesis_scaling.py``
+  → 6/6 passed (unaffected).
+- ``PYTHONPATH=src python tests/test_block_unitary_synthesis_equivalence.py``
+  → 12/12 passed (unaffected).
+- ``PYTHONPATH=src python tests/test_block_unitary_synthesis_amortization.py``
+  → 5/5 passed (unaffected).
+- ``PYTHONPATH=src python tests/test_model_resource_counts.py``
+  → 15/15 passed (unaffected).
+
+**Achieved goal:** Pinned the ``I_1(n_blocks, N)`` per-reflection b=0
+intercept of the block-unitary synthesis bloq (GOALS.md "Improve
+constant factors in quantum algorithms"). Combined with the K-linear,
+b-affine, slope-identity, and ``sqrt(n_blocks)``-amortization tests
+from cycles 1–4, the Bloq-side cost of ``BlockUnitarySynthesisQROAM``
+is now fully characterized as a closed-form-shaped expression with a
+single tabulated unknown (the intercept). The analytic-vs-Bloq guard
+on the synthesis path is now feature-complete from the Bloq side.
+
+**Next recommended task:** Add a ``block_unitary_synthesis_count``
+function in ``src/integrations/qualtran/model_resource_counts.py``
+parameterized as ``K * (2*(log2(N)+1)*b + I_1(n_blocks, N))``, with
+``I_1`` provided either as a closed-form derivation of the
+``QROAMClean`` table-loading cost (table length ``M = n_blocks * N``,
+optimal block-size ``2 * sqrt(M / b)``-style trade-off) or, as a
+conservative first pass, looked up from the same reference table
+this cycle pins. Add a ``test_synthesis_estimator_matches_closed_form``
+analogous to ``test_estimator_matches_closed_form`` for the
+interferometer — that closes the modelling gap cycles 3–5 have been
+incrementally building toward.
+=== claude cycle ended: Sun May 17 cycle 5 ===
