@@ -859,3 +859,73 @@ closed form from QROAMClean's optimizer (so the dict becomes a
 regression cache rather than the source of truth) — but that work is no
 longer gating any report-side use of the estimator.
 === claude cycle ended: Sat May 16 cycle 11 ===
+=== claude cycle ended: Sat May 16 09:24:50 PM PDT 2026 ===
+=== claude cycle started: Sat May 16 09:25:50 PM PDT 2026 ===
+
+## Cycle 12 — 2026-05-16
+
+**Task selected:** The cycle-11-recommended next task — add a synthesis-bloq
+panel to ``_plot_report`` in ``model_resource_counts.py``. With the analytic
+``block_unitary_synthesis_count`` estimator fully populated for Toffoli and
+total qubits over the tabulated grid, the report PDF can now show synthesis
+curves without re-running the bloq.
+
+**Major changes:**
+- ``src/integrations/qualtran/model_resource_counts.py``:
+  - New ``SYNTHESIS_PANEL_N_BLOCKS = (1, 2, 4, 8, 16, 32, 64)`` covering the
+    full tabulated intercept grid for n_blocks.
+  - New ``_synthesis_panel_records(n_rows, bitsize, n_reflections,
+    n_blocks_seq)`` helper that sweeps ``block_unitary_synthesis_count`` over
+    the power-of-two ``n_blocks`` sequence.
+  - ``_plot_report`` extended with two new plot pages
+    (``plot_synthesis("toffoli")``, ``plot_synthesis("qubits")``) and a
+    ``synthesis_table_page`` page; signature now accepts
+    ``synthesis_n_blocks`` and ``synthesis_n_reflections`` kwargs
+    (defaults: tabulated grid and ``K = block_dim``).
+  - ``summary_page`` updated to describe the new synthesis panel: which
+    parameters were swept and the ``total_qubits = signature + workspace``
+    decomposition.
+- ``tests/test_model_resource_counts.py`` (3 new tests, 26→29):
+  - ``test_synthesis_panel_records_match_block_unitary_synthesis_count``
+    pins that the helper is a thin sweep over the underlying analytic
+    estimator (no aggregation, no transformation).
+  - ``test_synthesis_panel_records_use_tabulated_grid`` confirms every
+    default ``(n_blocks, n_rows, bitsize=32)`` panel point is in both the
+    intercept and workspace tables, ruling out a silent KeyError.
+  - ``test_plot_report_generates_pdf`` smoke-tests that the full PDF
+    pipeline (including the new synthesis pages) writes a non-empty file
+    at the default block_dim/bitsize parameters.
+
+**Files changed:**
+- Modified: ``src/integrations/qualtran/model_resource_counts.py``
+- Modified: ``tests/test_model_resource_counts.py`` (3 new tests)
+
+**Tests/checks run:**
+- ``PYTHONPATH=src python tests/test_model_resource_counts.py``
+  → 29/29 passed (was 26/26).
+- ``PYTHONPATH=src python tests/test_block_unitary_synthesis_b_intercept.py``
+  → 5/5 passed (unaffected).
+- ``PYTHONPATH=src python tests/test_block_unitary_synthesis_qubit_count.py``
+  → 5/5 passed (unaffected; confirms the workspace-monotonicity invariants
+  the new panel relies on are preserved).
+
+**Achieved goal:** The analytic synthesis estimator
+(``block_unitary_synthesis_count``) is now plumbed into the report PDF
+generator (GOALS.md "Improve constant factors in quantum algorithms" /
+"Any potential improvements on the final Toffoli complexity/qubit
+counts/scaling"). Toffoli and total-qubit curves for
+``BlockUnitarySynthesisQROAM`` can be regenerated from a pure-Python
+closed-form expression with tabulated workspace, without needing to
+re-run the bloq — closing the report-side use case cycles 5–11 were
+incrementally building toward.
+
+**Next recommended task:** Derive ``SYNTHESIS_WORKSPACE_QUBITS`` (or at
+least ``SYNTHESIS_PER_REFLECTION_INTERCEPT``) in closed form from
+QROAMClean's optimizer expression. Once the closed form reproduces every
+tabulated entry, the two dicts become a regression cache rather than the
+source of truth, and the synthesis estimator extends to arbitrary
+``(n_blocks, n_rows, bitsize)`` without needing to re-run the bloq to
+populate new grid points. The b-affineness, K-linearity, and
+``log_block_sizes``-monotonicity tests from cycles 3–10 are the anchors a
+closed-form derivation must satisfy.
+=== claude cycle ended: Sat May 16 cycle 12 ===

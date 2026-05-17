@@ -411,12 +411,36 @@ def power_law_fit(xs: Sequence[int], ys: Sequence[int]) -> tuple[float, float]:
     return float(alpha), float(np.exp(log_c))
 
 
+SYNTHESIS_PANEL_N_BLOCKS: tuple[int, ...] = (1, 2, 4, 8, 16, 32, 64)
+
+
+def _synthesis_panel_records(
+    n_rows: int,
+    bitsize: int,
+    n_reflections: int,
+    n_blocks_seq: Sequence[int] = SYNTHESIS_PANEL_N_BLOCKS,
+) -> list[SynthesisResourceCount]:
+    """Evaluate ``block_unitary_synthesis_count`` over a power-of-two ``n_blocks`` sweep.
+
+    Only points present in the tabulated intercept and workspace grids are
+    valid; the default sequence covers the full ``SYNTHESIS_PER_REFLECTION_INTERCEPT``
+    grid for ``n_blocks``.
+    """
+
+    return [
+        block_unitary_synthesis_count(nb, n_rows, bitsize, n_reflections)
+        for nb in n_blocks_seq
+    ]
+
+
 def _plot_report(
     *,
     block_dim: int,
     bitsize: int,
     k_values: Sequence[int],
     out_pdf: str,
+    synthesis_n_blocks: Sequence[int] = SYNTHESIS_PANEL_N_BLOCKS,
+    synthesis_n_reflections: int | None = None,
 ) -> tuple[list[ResourceCount], list[ResourceCount]]:
     """Generate a PDF report and return theoretical T/Q optimized records."""
 
@@ -437,6 +461,14 @@ def _plot_report(
         optimize_block_unitary_interferometer(k**3, block_dim, bitsize, objective="qubits")
         for k in k_values
     ]
+
+    synth_n_reflections = synthesis_n_reflections if synthesis_n_reflections is not None else block_dim
+    synth_records = _synthesis_panel_records(
+        n_rows=block_dim,
+        bitsize=bitsize,
+        n_reflections=synth_n_reflections,
+        n_blocks_seq=synthesis_n_blocks,
+    )
 
     fits = {
         "theory_topt_t": power_law_fit(blocks, [r.toffoli for r in t_opt]),
@@ -516,6 +548,66 @@ def _plot_report(
         fig.tight_layout()
         return fig
 
+    def plot_synthesis(metric: str):
+        fig, ax = plt.subplots(figsize=(9.5, 5.8))
+        if metric == "toffoli":
+            ys = [r.toffoli for r in synth_records]
+            ylabel = "Synthesis Toffoli count"
+        else:
+            ys = [r.total_qubits for r in synth_records]
+            ylabel = "Synthesis peak logical qubits"
+        ax.plot(list(synthesis_n_blocks), ys, "o-",
+                label=f"BlockUnitarySynthesisQROAM (K={synth_n_reflections})")
+        ax.set_xscale("log", base=2)
+        if metric == "toffoli":
+            ax.set_yscale("log")
+        ax.set_xlabel("n_blocks (power of two)")
+        ax.set_ylabel(ylabel)
+        ax.set_xticks(list(synthesis_n_blocks))
+        ax.set_xticklabels([str(nb) for nb in synthesis_n_blocks])
+        ax.grid(True, which="both", alpha=0.25)
+        ax.set_title(
+            f"{ylabel} (analytic; N={block_dim}, b={bitsize}, "
+            f"K={synth_n_reflections})"
+        )
+        ax.legend(fontsize=8)
+        fig.tight_layout()
+        return fig
+
+    def synthesis_table_page():
+        fig, ax = plt.subplots(figsize=(10, 5.6))
+        ax.axis("off")
+        rows = [
+            [
+                r.n_blocks,
+                f"{r.toffoli:,}",
+                r.signature_qubits,
+                r.workspace_qubits,
+                r.total_qubits,
+            ]
+            for r in synth_records
+        ]
+        tbl = ax.table(
+            cellText=rows,
+            colLabels=[
+                "n_blocks",
+                "Toffoli",
+                "signature qubits",
+                "workspace qubits",
+                "total qubits",
+            ],
+            loc="center",
+            cellLoc="center",
+        )
+        tbl.auto_set_font_size(False)
+        tbl.set_fontsize(8.5)
+        tbl.scale(1, 1.6)
+        ax.set_title(
+            f"BlockUnitarySynthesisQROAM analytic counts "
+            f"(N={block_dim}, b={bitsize}, K={synth_n_reflections})"
+        )
+        return fig
+
     def table_page():
         fig, ax = plt.subplots(figsize=(11, 5.8))
         ax.axis("off")
@@ -579,6 +671,20 @@ def _plot_report(
         for label, (alpha, coeff) in fits.items():
             lines.append(f"  {label}: alpha={alpha:.3f}, c={coeff:.3e}")
         lines.append("")
+        lines.append(
+            f"Synthesis panel: BlockUnitarySynthesisQROAM analytic Toffoli + total qubits"
+        )
+        lines.append(
+            f"  swept over n_blocks={list(synthesis_n_blocks)}, "
+            f"N={block_dim}, b={bitsize}, K={synth_n_reflections}."
+        )
+        lines.append(
+            "  total_qubits = signature + tabulated QROAMClean workspace; matches"
+        )
+        lines.append(
+            "  the bloq's QubitCount exactly over the tabulated grid."
+        )
+        lines.append("")
         lines.append("The comparison curves marked previous report are read-only constants from")
         lines.append("the earlier rows=256, cols=208 matched-uncompute interferometer report.")
         ax.text(0.03, 0.97, "\n".join(lines), va="top", ha="left", family="monospace", fontsize=9.2)
@@ -593,6 +699,9 @@ def _plot_report(
             lambda: plot_count("qubits"),
             lambda: plot_count("toffoli", scale=QPE_SUBNORMALIZATION_FACTOR),
             table_page,
+            lambda: plot_synthesis("toffoli"),
+            lambda: plot_synthesis("qubits"),
+            synthesis_table_page,
         ):
             fig = make()
             pdf.savefig(fig, bbox_inches="tight")

@@ -40,9 +40,11 @@ except ModuleNotFoundError:  # pragma: no cover - fallback for environments with
     sys.modules["pytest"] = pytest  # type: ignore[assignment]
 
 from integrations.qualtran.model_resource_counts import (
+    SYNTHESIS_PANEL_N_BLOCKS,
     SYNTHESIS_PER_REFLECTION_INTERCEPT,
     SYNTHESIS_WORKSPACE_QUBITS,
     SynthesisResourceCount,
+    _synthesis_panel_records,
     assert_power_of_two,
     block_unitary_interferometer_count,
     block_unitary_interferometer_qubits,
@@ -362,6 +364,44 @@ def test_block_unitary_synthesis_count_total_qubits_matches_bloq():
             )
             qc = int(get_cost_value(bloq, QubitCount()))
             assert rec.total_qubits == qc, (nb, N, b, rec.total_qubits, qc)
+
+
+def test_synthesis_panel_records_match_block_unitary_synthesis_count():
+    """The panel helper must be a thin sweep over ``block_unitary_synthesis_count``."""
+    recs = _synthesis_panel_records(n_rows=256, bitsize=32, n_reflections=256)
+    assert [r.n_blocks for r in recs] == list(SYNTHESIS_PANEL_N_BLOCKS)
+    for r in recs:
+        ref = block_unitary_synthesis_count(r.n_blocks, 256, 32, 256)
+        assert r == ref
+
+
+def test_synthesis_panel_records_use_tabulated_grid():
+    """Default panel ``n_blocks`` values are all present in the workspace table."""
+    for nb in SYNTHESIS_PANEL_N_BLOCKS:
+        for n_rows in (4, 8, 16, 32, 64, 128, 256):
+            assert (nb, n_rows, 32) in SYNTHESIS_WORKSPACE_QUBITS
+            assert (nb, n_rows) in SYNTHESIS_PER_REFLECTION_INTERCEPT
+
+
+def test_plot_report_generates_pdf(tmp_path=None):
+    """Smoke test: ``_plot_report`` writes a non-empty PDF with the new synthesis pages."""
+    pytest.importorskip("matplotlib")
+    import os as _os
+    import tempfile
+
+    from integrations.qualtran.model_resource_counts import _plot_report
+
+    out_dir = tempfile.mkdtemp(prefix="model_resource_counts_test_") if tmp_path is None else str(tmp_path)
+    out_pdf = _os.path.join(out_dir, "report.pdf")
+    t_opt, q_opt = _plot_report(
+        block_dim=256,
+        bitsize=32,
+        k_values=range(1, 3),
+        out_pdf=out_pdf,
+    )
+    assert _os.path.exists(out_pdf)
+    assert _os.path.getsize(out_pdf) > 0
+    assert len(t_opt) == 2 and len(q_opt) == 2
 
 
 def test_optimal_log_block_sizes_returns_non_negative():
