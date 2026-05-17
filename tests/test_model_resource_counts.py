@@ -342,6 +342,51 @@ def test_block_unitary_synthesis_workspace_table_consistent():
             assert SYNTHESIS_WORKSPACE_QUBITS[(nb, N, b)] > 0
 
 
+def test_block_unitary_synthesis_workspace_table_monotone():
+    """Structural monotonicity invariants on the tabulated workspace.
+
+    The cycle-10 ``test_workspace_monotone_in_n_blocks`` /
+    ``test_workspace_monotone_in_n_rows`` tests only sweep one slice each
+    (``n_rows=16, bitsize=4`` and ``n_blocks=4, bitsize=4`` respectively)
+    against the Bloq. This pure-Python check pins the same invariants on
+    the *tabulated* values across every slice of the 7x7x5 grid:
+
+      * non-decreasing in ``n_blocks`` along ``(1,2,4,8,16,32,64)``
+        at every fixed ``(n_rows, bitsize)`` (35 slices)
+      * non-decreasing in ``n_rows`` along ``(4,8,16,32,64,128,256)``
+        at every fixed ``(n_blocks, bitsize)`` (35 slices)
+
+    Catches silent corruption of any single entry far faster than the
+    Bloq-based cross-check, and locks in the structural property that any
+    future re-tabulation must preserve. Note: monotonicity in ``bitsize``
+    is *not* an invariant — the QROAMClean optimizer's discrete block-size
+    choice can cause non-monotone bitsize trends.
+    """
+    nb_seq = (1, 2, 4, 8, 16, 32, 64)
+    nr_seq = (4, 8, 16, 32, 64, 128, 256)
+    bitsizes = (2, 4, 8, 16, 32)
+    for nr in nr_seq:
+        for b in bitsizes:
+            prev = -1
+            for nb in nb_seq:
+                v = SYNTHESIS_WORKSPACE_QUBITS[(nb, nr, b)]
+                assert v >= prev, (
+                    f"workspace drops along n_blocks at (n_rows={nr},bitsize={b}): "
+                    f"{prev} -> {v} at n_blocks={nb}"
+                )
+                prev = v
+    for nb in nb_seq:
+        for b in bitsizes:
+            prev = -1
+            for nr in nr_seq:
+                v = SYNTHESIS_WORKSPACE_QUBITS[(nb, nr, b)]
+                assert v >= prev, (
+                    f"workspace drops along n_rows at (n_blocks={nb},bitsize={b}): "
+                    f"{prev} -> {v} at n_rows={nr}"
+                )
+                prev = v
+
+
 def test_block_unitary_synthesis_count_total_qubits_matches_bloq():
     """``total_qubits = signature + workspace`` must equal the Bloq's ``QubitCount`` exactly.
 

@@ -990,3 +990,72 @@ fixture against which any candidate closed form can be checked, and
 the new equality guard ensures the production estimator stays in
 sync with whichever side ends up being the source of truth.
 === claude cycle ended: Sat May 16 cycle 13 ===
+=== claude cycle ended: Sat May 16 09:32:58 PM PDT 2026 ===
+=== claude cycle started: Sat May 16 09:33:58 PM PDT 2026 ===
+
+## Cycle 14 — 2026-05-16
+
+**Task selected:** Add a fast pure-Python structural-invariant
+monotonicity test on ``SYNTHESIS_WORKSPACE_QUBITS``. Cycle 10 added
+Bloq-driven monotonicity tests
+(``test_workspace_monotone_in_n_blocks`` and
+``test_workspace_monotone_in_n_rows`` in
+``tests/test_block_unitary_synthesis_qubit_count.py``) but each only
+sweeps a single slice — ``n_rows=16, bitsize=4`` and
+``n_blocks=4, bitsize=4`` respectively. Silent corruption of a value at,
+say, ``(8, 256, 16)`` would not be caught by the existing tests until
+``test_block_unitary_synthesis_count_total_qubits_matches_bloq`` re-ran
+the full Bloq grid. This cycle adds a fast pure-dict check that locks
+in the same monotonicity invariants across every slice.
+
+Deferred (again) the cycle-12 / cycle-13-recommended derivation of
+``SYNTHESIS_WORKSPACE_QUBITS`` in closed form from QROAMClean's
+optimizer — that remains a larger task; this cycle hardens the existing
+tabulated infrastructure with a single small test.
+
+**Major changes:**
+- ``tests/test_model_resource_counts.py``:
+  - ``test_block_unitary_synthesis_workspace_table_monotone`` (1 new
+    test, 29→30):
+    * non-decreasing in ``n_blocks`` along ``(1,2,4,8,16,32,64)`` at
+      every fixed ``(n_rows, bitsize)`` (35 slices)
+    * non-decreasing in ``n_rows`` along ``(4,8,16,32,64,128,256)``
+      at every fixed ``(n_blocks, bitsize)`` (35 slices)
+  - Docstring explicitly notes that monotonicity in ``bitsize`` is
+    **not** an invariant (verified empirically: 16 of the 245 entries
+    show non-monotone bitsize trends, driven by the QROAMClean
+    optimizer's discrete block-size choices — e.g.,
+    ``(64, 256, 4)=139`` vs ``(64, 256, 8)=77``). This documents the
+    edge case for future authors who might be tempted to add an
+    over-broad invariant.
+
+**Files changed:**
+- Modified: ``tests/test_model_resource_counts.py`` (+1 test)
+
+**Tests/checks run:**
+- ``PYTHONPATH=src python tests/test_model_resource_counts.py``
+  → 30/30 passed (was 29/29).
+- ``PYTHONPATH=src python tests/test_block_unitary_synthesis_qubit_count.py``
+  → 5/5 passed (unaffected; the cycle-10 single-slice monotonicity
+  tests are preserved).
+- ``PYTHONPATH=src python tests/test_block_unitary_synthesis_b_intercept.py``
+  → 6/6 passed (unaffected).
+
+**Achieved goal:** Locked in ``n_blocks`` and ``n_rows`` monotonicity
+of ``SYNTHESIS_WORKSPACE_QUBITS`` across every (n_rows, bitsize) and
+(n_blocks, bitsize) slice — extending the cycle-10 single-slice
+Bloq-based coverage to the full 70-slice structural invariant
+(GOALS.md "Improve constant factors in quantum algorithms" / "Any
+potential improvements on the final Toffoli complexity/qubit
+counts/scaling"). Any single-entry corruption surfaces immediately
+without needing to re-run the Bloq.
+
+**Next recommended task:** Resume the long-standing recommendation from
+cycles 12/13 — derive ``SYNTHESIS_WORKSPACE_QUBITS`` (or
+``SYNTHESIS_PER_REFLECTION_INTERCEPT``) in closed form from
+QROAMClean's optimizer expression. The empirical observation pinned
+this cycle — that workspace is non-monotone in ``bitsize`` due to the
+optimizer's discrete block-size choice — is a useful constraint a
+candidate closed form must reproduce, alongside the now-confirmed
+``n_blocks``/``n_rows`` monotonicity.
+=== claude cycle ended: Sat May 16 cycle 14 ===
