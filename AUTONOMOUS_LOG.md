@@ -173,3 +173,73 @@ choice) and the `QROAMCleanAdjoint` cost, then add a
 `test_synthesis_estimator_matches_closed_form` analogous to the
 interferometer test.
 === claude cycle ended: Sat May 16 cycle 3 ===
+=== claude cycle ended: Sat May 16 07:54:30 PM PDT 2026 ===
+=== claude cycle started: Sat May 16 07:55:30 PM PDT 2026 ===
+
+## Cycle 4 — 2026-05-16
+
+**Task selected:** Pin down the ``n_blocks`` amortization identities of
+``BlockUnitarySynthesisQROAM`` — the property that block-indexed
+synthesis genuinely amortizes QROAM data loading across blocks (i.e.
+total Toffoli cost is sub-linear in ``n_blocks`` and approaches the
+QROAMClean ``sqrt(n_blocks)`` regime). This is the *raison d'être* of
+the block-indexed variant; the previous cycles pinned K-linearity and
+b-affineness but did not pin the ``n_blocks`` scaling at all.
+
+**Major changes:**
+- New ``tests/test_block_unitary_synthesis_amortization.py`` (5 tests):
+  - **Strict sub-linearity:** ``T(n_blocks) < n_blocks * T(1)`` for all
+    ``n_blocks >= 2`` across a ``(N, b, K)`` grid with ``N in {4, 8, 16}``,
+    ``b in {4, 6, 8, 12}``, ``K in {1, N/2, N}``.
+  - **Monotone non-increasing average:** ``T(n_blocks)/n_blocks`` does
+    not increase along the doubling sequence ``n_blocks in {1, 2, 4, 8, 16}``.
+  - **Quadrupling bound:** ``T(4*n_blocks) <= 2 * T(n_blocks)`` — the
+    QROAMClean ``sqrt(M)`` scaling bound under table-length quadrupling.
+  - **K-independence of ``n_blocks`` ratio:** ``T(n2, K)/T(n1, K)`` is
+    invariant in ``K``. Follows from K-linearity but is the load-bearing
+    consistency check that ``n_blocks`` amortization is not entangled
+    with reflection-count accounting.
+  - **Asymptotic quadrupling identity:** At large ``n_blocks``,
+    ``1.7 <= T(64)/T(16) <= 2.0`` — confirms the ratio approaches the
+    sqrt-scaling limit of 2 and rules out degenerate cases where the
+    QROAM contribution becomes negligible.
+- Note in the file's docstring on the chosen ``N >= 4, b >= 4`` regime:
+  for ``N=2`` or ``b=2`` the Hadamard / reflection-about-zero per-
+  reflection overhead dominates QROAM and the amortization claim is
+  not meaningful (this was confirmed empirically before choosing the
+  test grid).
+- The test file also runs as a script (no pytest required) and uses
+  ``importorskip("qualtran")`` so it skips cleanly if qualtran is absent.
+
+**Files changed:**
+- Added: ``tests/test_block_unitary_synthesis_amortization.py`` (5 tests)
+- Updated: ``AUTONOMOUS_LOG.md``
+
+**Tests/checks run:**
+- ``PYTHONPATH=src python tests/test_block_unitary_synthesis_amortization.py``
+  → 5/5 passed.
+- ``PYTHONPATH=src python tests/test_block_unitary_synthesis_scaling.py``
+  → 6/6 passed (unaffected).
+- ``PYTHONPATH=src python tests/test_block_unitary_synthesis_equivalence.py``
+  → 12/12 passed (unaffected).
+- ``PYTHONPATH=src python tests/test_model_resource_counts.py``
+  → 15/15 passed (unaffected).
+
+**Achieved goal:** Locked in the ``n_blocks``-amortization invariants
+of the block-unitary synthesis bloq (GOALS.md "Improve constant
+factors in quantum algorithms"). The block-indexed variant exists
+*because* it amortizes QROAM data loading; any future change that
+silently breaks the sub-linear scaling or the QROAMClean
+``sqrt`` regime will now fail an explicit test rather than degrade
+the report numbers unnoticed.
+
+**Next recommended task:** With K-linearity, b-affineness,
+b-slope-= 2(log2(N)+1), and ``n_blocks`` sqrt-amortization all pinned,
+the remaining missing piece for the analytic-vs-Bloq guard on the
+synthesis path is the b=0 intercept (the ``b``-independent QROAMClean
++ ``QROAMCleanAdjoint`` per-reflection cost). Deriving this closed
+form against the existing identities would let
+``model_resource_counts.py`` add a synthesis-bloq estimator analogous
+to ``block_unitary_interferometer_count``, closing the modelling gap
+the cycle-3 plan called out.
+=== claude cycle ended: Sat May 16 cycle 4 ===
