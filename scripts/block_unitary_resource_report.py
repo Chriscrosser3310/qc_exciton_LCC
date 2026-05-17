@@ -28,9 +28,10 @@ REPO_ROOT = os.path.normpath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.join(REPO_ROOT, "src"))
 
 from integrations.qualtran.block_unitary_interferometer_QROAM import (
-    estimate_interferometer_resources,
+    BlockUnitaryInterferometerSynthesisQROAM,
     optimal_interferometer_log_block_sizes,
 )
+from integrations.qualtran.model_resource_counts import optimize_block_unitary_interferometer
 from integrations.qualtran.block_unitary_synthesis_QROAM import BlockUnitarySynthesisQROAM
 from integrations.qualtran.unitary_synthesis_QROAM import UnitarySynthesisQROAM
 from integrations.qualtran.utils import get_Toffoli_counts, get_qubit_counts
@@ -39,11 +40,17 @@ K_VALUES = list(range(1, 7))
 N_BLOCKS_VALUES = [k**3 for k in K_VALUES]
 N_SITES = 26
 MULTIPLIER = 8
-N_ROWS = 1 << (MULTIPLIER * N_SITES - 1).bit_length()
-N_REFLECTIONS = N_ROWS
+N_COLS = 1 << (MULTIPLIER * N_SITES - 1).bit_length()  # round up to power of 2
+N_ROWS = N_COLS
+N_REFLECTIONS = N_COLS
 PHASE_BITSIZE = 32
+QPE_SUBNORMALIZATION_FACTOR = 10**5
 SWEEP_LOG_BLOCK_SIZES = list(range(0, 11))
-OUT_PDF = os.path.join(REPO_ROOT, "docs", f"block_unitary_interferometer_resource_report_b{PHASE_BITSIZE}.pdf")
+OUT_PDF = os.path.join(
+    REPO_ROOT,
+    "docs",
+    f"block_unitary_interferometer_resource_report_rows{N_ROWS}_cols{N_COLS}_bloq_vs_theory_b{PHASE_BITSIZE}.pdf",
+)
 RECIPIENT = "jchen9@caltech.edu"
 
 
@@ -86,27 +93,62 @@ def optimize_standard(n_blocks: int) -> tuple[Record, Record]:
     records = [r for lbs in SWEEP_LOG_BLOCK_SIZES if (r := compute_standard_resources(n_blocks, lbs))]
     if not records:
         raise RuntimeError(f"no valid standard records for n_blocks={n_blocks}")
-    return min(records, key=lambda r: (r.toffoli, r.qubits)), min(records, key=lambda r: (r.qubits, r.toffoli))
+    toffoli_opt = records[0]
+    for record in records[1:]:
+        if record.toffoli > toffoli_opt.toffoli:
+            break
+        if (record.toffoli, record.qubits) < (toffoli_opt.toffoli, toffoli_opt.qubits):
+            toffoli_opt = record
+    return toffoli_opt, min(records, key=lambda r: (r.qubits, r.toffoli))
 
 
-def compute_interferometer_resources(n_blocks: int, layer_lbs: int, final_lbs: int) -> Record:
-    est = estimate_interferometer_resources(
+def _lbs_for(lbs: int, n_blocks: int) -> list:
+    """Map scalar lbs to the QROAM log_block_sizes list that gives total lambda = 2^lbs.
+
+    For n_blocks > 1 the QROAM is 2-D (block, pair/system); we block only in the
+    second (pair/system) dimension to match the analytic formula's single-lambda model.
+    For n_blocks == 1 there is only one selection dimension, so a 1-element list suffices.
+    """
+    return [lbs] if n_blocks == 1 else [0, lbs]
+
+
+def compute_interferometer_resources(
+    n_blocks: int,
+    lambda1_lbs: int,
+    lambda2_lbs: int,
+) -> Record:
+    bloq = BlockUnitaryInterferometerSynthesisQROAM(
         n_blocks=n_blocks,
         n_rows=N_ROWS,
         phase_bitsize=PHASE_BITSIZE,
-        layer_log_block_size=layer_lbs,
-        final_log_block_size=final_lbs,
+        n_layers=N_COLS,
+        log_block_sizes=_lbs_for(lambda1_lbs, n_blocks),
+        final_log_block_sizes=_lbs_for(lambda1_lbs, n_blocks),
+        final_adjoint_log_block_sizes=_lbs_for(lambda2_lbs, n_blocks),
     )
-    return Record(est.toffoli, est.qubits, est.layer_log_block_size, est.final_log_block_size)
+    return Record(int(get_Toffoli_counts(bloq)), int(get_qubit_counts(bloq)), lambda1_lbs, lambda2_lbs)
 
 
 def optimize_interferometer(n_blocks: int) -> tuple[Record, Record]:
     records = [
-        compute_interferometer_resources(n_blocks, layer_lbs, final_lbs)
-        for layer_lbs in SWEEP_LOG_BLOCK_SIZES
-        for final_lbs in SWEEP_LOG_BLOCK_SIZES
+        compute_interferometer_resources(n_blocks, lambda1_lbs, lambda2_lbs)
+        for lambda1_lbs in SWEEP_LOG_BLOCK_SIZES
+        for lambda2_lbs in SWEEP_LOG_BLOCK_SIZES
     ]
     return min(records, key=lambda r: (r.toffoli, r.qubits)), min(records, key=lambda r: (r.qubits, r.toffoli))
+
+
+def optimize_theory(n_blocks: int) -> tuple[Record, Record]:
+    t_rec = optimize_block_unitary_interferometer(
+        n_blocks, N_ROWS, PHASE_BITSIZE, objective="toffoli"
+    )
+    q_rec = optimize_block_unitary_interferometer(
+        n_blocks, N_ROWS, PHASE_BITSIZE, objective="qubits"
+    )
+    return (
+        Record(t_rec.toffoli, t_rec.qubits, t_rec.log_lambda_1, t_rec.log_lambda_2),
+        Record(q_rec.toffoli, q_rec.qubits, q_rec.log_lambda_1, q_rec.log_lambda_2),
+    )
 
 
 def fit_power_law(x: np.ndarray, y: list[int]) -> tuple[float, float]:
@@ -120,7 +162,8 @@ def series(records: dict[str, list[Record]], metric: str) -> dict[str, list[int]
 
 print("=" * 78)
 print("Block-unitary synthesis comparison")
-print(f"  N = {N_ROWS} (smallest power of two >= 8*26 = {MULTIPLIER * N_SITES})")
+print(f"  rows = cols = {N_ROWS} (smallest power of two >= 8*26 = {MULTIPLIER*N_SITES})")
+print(f"  cols/reflections/layers = {N_COLS} (rounded up from 8*26={MULTIPLIER*N_SITES})")
 print(f"  blocks M = k^3 for k={K_VALUES}")
 print(f"  phase_bitsize = {PHASE_BITSIZE}")
 print("=" * 78)
@@ -128,6 +171,8 @@ print("=" * 78)
 records: dict[str, list[Record]] = {
     "interferometer_topt": [],
     "interferometer_qopt": [],
+    "theory_topt": [],
+    "theory_qopt": [],
     "standard_topt": [],
     "standard_qopt": [],
 }
@@ -135,16 +180,25 @@ records: dict[str, list[Record]] = {
 for k, n_blocks in zip(K_VALUES, N_BLOCKS_VALUES):
     print(f"k={k}, M={n_blocks}")
     it, iq = optimize_interferometer(n_blocks)
+    tt, tq = optimize_theory(n_blocks)
     st, sq = optimize_standard(n_blocks)
     records["interferometer_topt"].append(it)
     records["interferometer_qopt"].append(iq)
+    records["theory_topt"].append(tt)
+    records["theory_qopt"].append(tq)
     records["standard_topt"].append(st)
     records["standard_qopt"].append(sq)
-    approx_lbs = optimal_interferometer_log_block_sizes(n_blocks, N_ROWS, PHASE_BITSIZE)
     print(
         f"  interferometer T-opt T={it.toffoli:,} Q={it.qubits} "
-        f"lbs=({it.layer_lbs},{it.final_lbs}); Q-opt T={iq.toffoli:,} Q={iq.qubits} "
-        f"lbs=({iq.layer_lbs},{iq.final_lbs}); continuous-opt approx={approx_lbs}"
+        f"lbs=(lambda1={it.layer_lbs}, lambda2={it.final_lbs}); "
+        f"Q-opt T={iq.toffoli:,} Q={iq.qubits} "
+        f"lbs=(lambda1={iq.layer_lbs}, lambda2={iq.final_lbs})"
+    )
+    print(
+        f"  theoretical    T-opt T={tt.toffoli:,} Q={tt.qubits} "
+        f"lbs=(lambda1={tt.layer_lbs}, lambda2={tt.final_lbs}); "
+        f"Q-opt T={tq.toffoli:,} Q={tq.qubits} "
+        f"lbs=(lambda1={tq.layer_lbs}, lambda2={tq.final_lbs})"
     )
     print(
         f"  standard       T-opt T={st.toffoli:,} Q={st.qubits} lbs={st.layer_lbs}; "
@@ -168,31 +222,38 @@ for name, fit in fits.items():
 
 
 LABELS = {
-    "interferometer_topt": "Interferometer, Toffoli-opt",
-    "interferometer_qopt": "Interferometer, qubit-opt",
+    "interferometer_topt": "Interferometer bloq, Toffoli-opt",
+    "interferometer_qopt": "Interferometer bloq, qubit-opt",
+    "theory_topt": "Theory formula, Toffoli-opt",
+    "theory_qopt": "Theory formula, qubit-opt",
     "standard_topt": "Standard Householder, Toffoli-opt",
     "standard_qopt": "Standard Householder, qubit-opt",
 }
 COLORS = {
     "interferometer_topt": "#1f77b4",
     "interferometer_qopt": "#2ca02c",
+    "theory_topt": "#17becf",
+    "theory_qopt": "#bcbd22",
     "standard_topt": "#d62728",
     "standard_qopt": "#9467bd",
 }
 MARKERS = {
     "interferometer_topt": "o",
     "interferometer_qopt": "s",
+    "theory_topt": "P",
+    "theory_qopt": "X",
     "standard_topt": "^",
     "standard_qopt": "D",
 }
 
 
-def plot_metric(metric: str, ylabel: str):
+def plot_metric(metric: str, ylabel: str, *, scale: int = 1, title_suffix: str = ""):
     fig, ax = plt.subplots(figsize=(9.5, 5.8))
     xfit = np.linspace(M.min(), M.max(), 300)
     for name, recs in records.items():
-        data = [getattr(r, metric) for r in recs]
+        data = [scale * getattr(r, metric) for r in recs]
         alpha, c = fits[name][metric]
+        c *= scale
         ax.plot(M, data, marker=MARKERS[name], color=COLORS[name], linewidth=1.7, label=LABELS[name])
         ax.plot(xfit, c * xfit**alpha, ":", color=COLORS[name], linewidth=1.1, alpha=0.75)
         ax.text(M[-1] * 1.03, data[-1], f"a={alpha:.2f}\nc={c:.1e}", color=COLORS[name], fontsize=7)
@@ -204,13 +265,16 @@ def plot_metric(metric: str, ylabel: str):
     ax.set_xticklabels([f"{int(m)}\nk={k}" for m, k in zip(M, K_VALUES)])
     ax.grid(True, which="both", alpha=0.25)
     ax.legend(fontsize=8)
-    ax.set_title(f"{ylabel} for block unitary synthesis (N={N_ROWS}, b={PHASE_BITSIZE})")
+    ax.set_title(
+        f"{ylabel} for block unitary synthesis "
+        f"(rows={N_ROWS}, cols={N_COLS}, b={PHASE_BITSIZE}){title_suffix}"
+    )
     fig.tight_layout()
     return fig
 
 
 def table_page():
-    fig, ax = plt.subplots(figsize=(11, 6))
+    fig, ax = plt.subplots(figsize=(11.5, 7.0))
     ax.axis("off")
     cols = [
         "k",
@@ -219,6 +283,10 @@ def table_page():
         "Int T-opt Q",
         "Int Q-opt T",
         "Int Q-opt Q",
+        "Theory T-opt T",
+        "Theory T-opt Q",
+        "Theory Q-opt T",
+        "Theory Q-opt Q",
         "Std T-opt T",
         "Std T-opt Q",
         "Std Q-opt T",
@@ -234,6 +302,10 @@ def table_page():
                 records["interferometer_topt"][i].qubits,
                 f"{records['interferometer_qopt'][i].toffoli:,}",
                 records["interferometer_qopt"][i].qubits,
+                f"{records['theory_topt'][i].toffoli:,}",
+                records["theory_topt"][i].qubits,
+                f"{records['theory_qopt'][i].toffoli:,}",
+                records["theory_qopt"][i].qubits,
                 f"{records['standard_topt'][i].toffoli:,}",
                 records["standard_topt"][i].qubits,
                 f"{records['standard_qopt'][i].toffoli:,}",
@@ -242,7 +314,7 @@ def table_page():
         )
     tbl = ax.table(cellText=rows, colLabels=cols, loc="center", cellLoc="center")
     tbl.auto_set_font_size(False)
-    tbl.set_fontsize(7.6)
+    tbl.set_fontsize(6.2)
     tbl.scale(1, 1.55)
     for (r, c), cell in tbl.get_celld().items():
         if r == 0:
@@ -260,18 +332,29 @@ def summary_page():
     lines = [
         "Block-aware interferometer synthesis with QROAM-loaded phases",
         "",
-        f"Dimension: N = {N_ROWS}, the smallest power of two >= 8*26 = {MULTIPLIER * N_SITES}.",
+        f"Rows = Cols = {N_ROWS}, the smallest power of two >= 8*26 = {MULTIPLIER*N_SITES}.",
+        f"Columns/reflections/layers: {N_COLS} (rounded up from 8*26={MULTIPLIER*N_SITES} to power of two).",
         f"Blocks: M = k^3 for k = {K_VALUES}. Phase precision b = {PHASE_BITSIZE}.",
         "",
-        "Interferometer model from the note:",
-        "  Each of N beamsplitter layers loads (alpha_l(x,j), beta_l(x,j)) by QROAM.",
-        "  The QROAM address is (block x, pair j); the target shift acts only on the target register.",
-        "  A final QROAM table addressed by (x,y) applies the block-dependent diagonal phase.",
+        "Interferometer bloq curves use get_Toffoli_counts / get_qubit_counts on",
+        "  BlockUnitaryInterferometerSynthesisQROAM (the actual Qualtran circuit).",
+        "  Key differences from theory formula:",
+        "  - Controlled AddIntoPhaseGrad (~2x vs uncontrolled) in each beamsplitter layer",
+        "  - Shifts modeled by N//2 pairs of AddK (cyclic increment) instead of analytic formula",
+        "  - QROAM cost from Qualtran's internal model (may differ by small constants)",
         "",
-        "Leading Toffoli estimate:",
-        "  T_layer = ceil(M*N/(2*Lambda)) + 2*Lambda*b - 5",
-        "  T_final = ceil(M*N/Lambda_f) + Lambda_f*b + ceil(M*N/Lambda_f) + Lambda_f - 6",
-        "  T_total = N*T_layer + (log2(N)-2)*(N-1) + T_final",
+        "Theory formula curves use the N x N model from model_resource_counts.py:",
+        "  T_layer = ceil(M*N/(2*L1)) + 2*b*L1 - 5 (uncontrolled AddIntoPhaseGrad approx)",
+        "  T_final = ceil(M*N/L1) + b*L1 + ceil(M*N/L2) + L2 - 6",
+        "  T_total = C*T_layer + (n-2)*(N-1) + T_final  [n=log2(N), C=layers]",
+        "",
+        f"Additional scaled plots multiply all counts by {QPE_SUBNORMALIZATION_FACTOR:.0e},",
+        "  termed multiplied by QPE iteration and subnormalization. Qubits are unscaled.",
+        "",
+        "Optimization convention:",
+        "  Lambda_1 is used for layer QROAM and final forward/phase shifts.",
+        "  Lambda_2 is used for final-layer QROAM uncomputation.",
+        "  The standard Householder baseline keeps its previous scalar early-stop sweep.",
         "",
         "Fitted power laws y = c * M^alpha:",
     ]
@@ -286,7 +369,18 @@ def summary_page():
 
 os.makedirs(os.path.dirname(OUT_PDF), exist_ok=True)
 with pdf_backend.PdfPages(OUT_PDF) as pdf:
-    for make in (summary_page, lambda: plot_metric("toffoli", "Toffoli count"), lambda: plot_metric("qubits", "Peak logical qubits"), table_page):
+    for make in (
+        summary_page,
+        lambda: plot_metric("toffoli", "Toffoli count"),
+        lambda: plot_metric("qubits", "Peak logical qubits"),
+        lambda: plot_metric(
+            "toffoli",
+            "Toffoli count multiplied by QPE iteration and subnormalization",
+            scale=QPE_SUBNORMALIZATION_FACTOR,
+            title_suffix="; multiplied by QPE iteration and subnormalization",
+        ),
+        table_page,
+    ):
         fig = make()
         pdf.savefig(fig, bbox_inches="tight")
         plt.close(fig)
@@ -310,12 +404,19 @@ def send_email(recipient: str, pdf_path: str) -> bool:
 
         Attached is the block-unitary resource report comparing the new
         block-aware interferometer/QROAM synthesis against the existing
-        Householder/QROAM block-unitary synthesis.
+        Householder/QROAM block-unitary synthesis and the theoretical formula
+        values from model_resource_counts.py.
 
         Parameters:
           M = k^3 for k = {K_VALUES}
-          N = {N_ROWS} (smallest power of two >= 8*26 = {MULTIPLIER * N_SITES})
+          rows = {N_ROWS} (smallest power of two >= 8*26 = {N_COLS})
+          cols/reflections/layers = {N_COLS} (strictly 8*26)
           phase_bitsize = {PHASE_BITSIZE}
+          lambda_1 is used for layer QROAM and final forward/phase shifts
+          lambda_2 is used for final-layer QROAM uncomputation
+          theory curves use the N x N theoretical model
+          Toffoli scaled plots multiply counts by {QPE_SUBNORMALIZATION_FACTOR:.0e};
+          qubits are unscaled
 
         Fits y = c * M^alpha:
         """
