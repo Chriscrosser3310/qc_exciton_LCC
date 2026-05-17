@@ -198,7 +198,7 @@ def test_block_unitary_synthesis_toffoli_validates_inputs():
     with pytest.raises(ValueError):
         block_unitary_synthesis_toffoli(1, 4, 4, 5)  # n_reflections > n_rows
     with pytest.raises(KeyError):
-        block_unitary_synthesis_toffoli(32, 4, 4, 1)  # missing intercept entry
+        block_unitary_synthesis_toffoli(128, 4, 4, 1)  # missing intercept entry
 
 
 def test_block_unitary_synthesis_toffoli_decomposition_identity():

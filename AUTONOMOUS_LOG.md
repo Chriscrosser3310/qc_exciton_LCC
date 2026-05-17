@@ -424,3 +424,85 @@ that is a ``block_unitary_synthesis_count`` wrapper that returns a
 full ``ResourceCount`` (including qubits) and a corresponding figure
 panel in the docs report.
 === claude cycle ended: Sat May 16 cycle 6 ===
+=== claude cycle ended: Sat May 16 08:10:00 PM PDT 2026 ===
+=== claude cycle started: Sat May 16 08:11:00 PM PDT 2026 ===
+
+## Cycle 7 — 2026-05-16
+
+**Task selected:** Extend ``SYNTHESIS_PER_REFLECTION_INTERCEPT`` (and its
+mirror ``REFERENCE`` table in
+``tests/test_block_unitary_synthesis_b_intercept.py``) from the 15-point
+``(n_blocks, N) ∈ {1,2,4,8,16} × {4,8,16}`` grid to the 49-point
+``{1,2,4,8,16,32,64} × {4,8,16,32,64,128,256}`` grid.
+
+The previous cycles' decomposition
+
+    T(n_blocks, N, K, b) = K * ( 2*(log2(N)+1)*b + I_1(n_blocks, N) )
+
+reduces the analytic estimator to a single ``I_1`` lookup, and prior
+cycles deferred a closed-form derivation of ``I_1``. Until that closed
+form is derived, the practical bottleneck is that the existing 15-point
+table cannot predict the synthesis cost at the parameters the actual
+report uses (default ``N=256``, ``n_blocks=k^3``). This cycle extends
+the tabulated regime to cover those parameters directly. The
+closed-form derivation remains the longer-term goal but is no longer
+the gating step for using the estimator in report-shaped runs.
+
+**Major changes:**
+- ``src/integrations/qualtran/model_resource_counts.py``:
+  - ``SYNTHESIS_PER_REFLECTION_INTERCEPT`` extended from 15 → 49 entries
+    covering ``n_blocks ∈ {1,2,4,8,16,32,64}`` and ``N ∈ {4,8,16,32,64,128,256}``.
+    Values computed from ``BlockUnitarySynthesisQROAM.from_shape(...)``
+    via ``QECGatesCost`` at ``K=1, b=4`` and the established b-affineness
+    / K-linearity identities — i.e. the same extraction procedure the
+    existing ``_intercept`` helper in
+    ``tests/test_block_unitary_synthesis_b_intercept.py`` uses.
+- ``tests/test_block_unitary_synthesis_b_intercept.py``:
+  - ``REFERENCE`` extended to the same 49-point grid. The two constants
+    stay synced; their equality remains an invariant a future
+    auto-generation step could enforce.
+- ``tests/test_model_resource_counts.py``:
+  - ``test_block_unitary_synthesis_toffoli_validates_inputs`` updated to
+    use ``(n_blocks=128, n_rows=4)`` as the off-grid ``KeyError`` probe,
+    since ``(32, 4)`` is now a populated entry.
+
+**Files changed:**
+- Modified: ``src/integrations/qualtran/model_resource_counts.py``
+- Modified: ``tests/test_block_unitary_synthesis_b_intercept.py``
+- Modified: ``tests/test_model_resource_counts.py``
+
+**Tests/checks run:**
+- ``PYTHONPATH=src python tests/test_block_unitary_synthesis_b_intercept.py``
+  → 5/5 passed (the full-decomposition test now ranges over the 49-point
+  grid × 5 b-values × 4 K-values).
+- ``PYTHONPATH=src python tests/test_model_resource_counts.py``
+  → 18/18 passed (including ``test_block_unitary_synthesis_toffoli_matches_bloq``
+  which now cross-checks the analytic count against the Bloq over the
+  full 49-point grid).
+- ``PYTHONPATH=src python tests/test_block_unitary_synthesis_scaling.py``
+  → 6/6 passed (unaffected).
+- ``PYTHONPATH=src python tests/test_block_unitary_synthesis_amortization.py``
+  → 5/5 passed (unaffected).
+- ``PYTHONPATH=src python tests/test_block_unitary_synthesis_equivalence.py``
+  → 12/12 passed (unaffected).
+
+**Achieved goal:** The analytic synthesis-bloq Toffoli estimator can
+now predict resources at the parameters the actual model-resource-counts
+report uses (default ``N=256``, ``n_blocks`` up to 64) without needing
+to re-run the Bloq (GOALS.md "Improve constant factors in quantum
+algorithms" / "Any potential improvements on the final Toffoli
+complexity/qubit counts/scaling"). This removes the practical KeyError
+blocker that would have prevented adding a synthesis-bloq panel to the
+report PDF generator.
+
+**Next recommended task:** With the 49-point grid in place, add a
+``block_unitary_synthesis_count`` wrapper (analogous to
+``block_unitary_interferometer_count``) that returns a full
+``ResourceCount`` including qubits, then plumb it into ``_plot_report``
+to add a synthesis-bloq panel in the report PDF. The qubit count needs
+deriving — base = ``ceil_log2(n_blocks) + log2(N) + b + 1`` (block +
+system + phase gradient + reflection ancilla) plus the QROAMClean
+workspace which depends on the optimal block size at the chosen
+``M = n_blocks * N``. The Bloq's ``log_block_sizes`` property exposes
+the optimizer's choice and could be queried for the per-row workspace.
+=== claude cycle ended: Sat May 16 cycle 7 ===
