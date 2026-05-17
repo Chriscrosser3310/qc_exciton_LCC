@@ -476,6 +476,17 @@ def _plot_report(
         "theory_topt_q": power_law_fit(blocks, [r.qubits for r in t_opt]),
         "theory_qopt_q": power_law_fit(blocks, [r.qubits for r in q_opt]),
     }
+    # Sub-linear (alpha < 1) scaling of synthesis Toffoli in n_blocks is the
+    # observable signature of QROAMClean amortization; pinned as a regression
+    # guard by ``test_synthesis_panel_power_law_subllinear``.
+    synth_fits = {
+        "synth_t": power_law_fit(
+            list(synthesis_n_blocks), [r.toffoli for r in synth_records]
+        ),
+        "synth_q": power_law_fit(
+            list(synthesis_n_blocks), [r.total_qubits for r in synth_records]
+        ),
+    }
 
     prev_blocks = [p.blocks for p in PREVIOUS_MATCHED_UNCOMPUTE_REPORT_ROWS256_COLS208]
     os.makedirs(os.path.dirname(out_pdf), exist_ok=True)
@@ -553,11 +564,21 @@ def _plot_report(
         if metric == "toffoli":
             ys = [r.toffoli for r in synth_records]
             ylabel = "Synthesis Toffoli count"
+            alpha, coeff = synth_fits["synth_t"]
         else:
             ys = [r.total_qubits for r in synth_records]
             ylabel = "Synthesis peak logical qubits"
+            alpha, coeff = synth_fits["synth_q"]
         ax.plot(list(synthesis_n_blocks), ys, "o-",
                 label=f"BlockUnitarySynthesisQROAM (K={synth_n_reflections})")
+        x_arr = np.asarray(synthesis_n_blocks, dtype=float)
+        ax.plot(
+            x_arr,
+            coeff * x_arr**alpha,
+            "--",
+            alpha=0.7,
+            label=f"fit: c*n_blocks^{alpha:.3f}",
+        )
         ax.set_xscale("log", base=2)
         if metric == "toffoli":
             ax.set_yscale("log")
@@ -684,6 +705,9 @@ def _plot_report(
         lines.append(
             "  the bloq's QubitCount exactly over the tabulated grid."
         )
+        lines.append("  Synthesis power-law fits y = c*n_blocks^alpha (alpha<1 ⇒ QROAM amortization):")
+        for label, (alpha_s, coeff_s) in synth_fits.items():
+            lines.append(f"    {label}: alpha={alpha_s:.3f}, c={coeff_s:.3e}")
         lines.append("")
         lines.append("The comparison curves marked previous report are read-only constants from")
         lines.append("the earlier rows=256, cols=208 matched-uncompute interferometer report.")

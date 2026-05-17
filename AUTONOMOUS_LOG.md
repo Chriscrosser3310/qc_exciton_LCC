@@ -1059,3 +1059,86 @@ optimizer's discrete block-size choice — is a useful constraint a
 candidate closed form must reproduce, alongside the now-confirmed
 ``n_blocks``/``n_rows`` monotonicity.
 === claude cycle ended: Sat May 16 cycle 14 ===
+=== claude cycle ended: Sat May 16 09:38:21 PM PDT 2026 ===
+=== claude cycle started: Sat May 16 09:39:21 PM PDT 2026 ===
+
+## Cycle 15 — 2026-05-16
+
+**Task selected:** Add a report-visible power-law fit for the synthesis
+panel (Toffoli and total_qubits vs ``n_blocks``) in ``_plot_report``,
+and pin its alpha as sub-linear (alpha < 1). Cycles 4 and 5 already
+proved sub-linear ``n_blocks`` amortization at the bloq-internal level
+via ``test_block_unitary_synthesis_amortization`` (``T(n_blocks) <
+n_blocks * T(1)``), but that property is a per-reflection-cost
+statement and is invisible to a reader of the report PDF. The
+interferometer side already exposes a ``power_law_fit`` table on the
+summary page; the synthesis side did not. This cycle closes that
+asymmetry with a small targeted change.
+
+Deferred (again) the long-standing recommendation to derive
+``SYNTHESIS_WORKSPACE_QUBITS`` or
+``SYNTHESIS_PER_REFLECTION_INTERCEPT`` in closed form from
+QROAMClean's optimizer — that remains a larger task and is not
+gating any report-side use of the estimator.
+
+**Major changes:**
+- ``src/integrations/qualtran/model_resource_counts.py``:
+  - ``_plot_report`` now computes ``synth_fits`` (a dict of
+    ``synth_t``, ``synth_q`` power-law fits via ``power_law_fit``
+    over ``synthesis_n_blocks``).
+  - ``plot_synthesis`` overlays the fit line ``c * n_blocks^alpha``
+    on both the Toffoli and total-qubit plots, labelled with alpha.
+  - ``summary_page`` reports the two synthesis alphas and coefficients
+    next to the existing interferometer fits, with a one-line note that
+    ``alpha < 1`` is the report-visible signature of QROAM
+    amortization.
+- ``tests/test_model_resource_counts.py``:
+  - Import ``power_law_fit`` from the module.
+  - New ``test_synthesis_panel_power_law_sublinear`` confirms
+    ``alpha_t ∈ [0, 1)`` and ``alpha_q ∈ [0, 1)`` for the canonical
+    report parameters (N=256, b=32, K=block_dim=256). Empirically
+    ``alpha_t ≈ 0.275`` and ``alpha_q ≈ 0.024`` — both well below 1,
+    consistent with the slope-times-b term dominating the synthesis
+    Toffoli at these parameters and ``total_qubits`` being essentially
+    flat in ``n_blocks``.
+
+**Files changed:**
+- Modified: ``src/integrations/qualtran/model_resource_counts.py``
+- Modified: ``tests/test_model_resource_counts.py`` (+1 test, 30→31)
+
+**Tests/checks run:**
+- ``PYTHONPATH=src python tests/test_model_resource_counts.py``
+  → 31/31 passed (was 30/30).
+- ``PYTHONPATH=src python tests/test_block_unitary_synthesis_b_intercept.py``
+  → 6/6 passed (unaffected).
+- ``PYTHONPATH=src python tests/test_block_unitary_synthesis_scaling.py``
+  → 6/6 passed (unaffected).
+- ``PYTHONPATH=src python tests/test_block_unitary_synthesis_amortization.py``
+  → 5/5 passed (unaffected).
+- ``PYTHONPATH=src python tests/test_block_unitary_synthesis_equivalence.py``
+  → 12/12 passed (unaffected).
+- ``PYTHONPATH=src python tests/test_block_unitary_synthesis_qubit_count.py``
+  → 5/5 passed (unaffected).
+
+**Achieved goal:** The QROAMClean ``n_blocks``-amortization claim
+(GOALS.md "Improve constant factors in quantum algorithms" / "Any
+potential improvements on the final Toffoli complexity/qubit
+counts/scaling") is now both (a) plotted on the synthesis panel as a
+visible fit line and (b) summarized in the report's text page with
+alpha values. A regression that broke sub-linear scaling would now
+fail a fast pure-Python test rather than silently changing the report
+curve.
+
+**Next recommended task:** Resume the cycle-12+ long-standing
+recommendation — derive ``SYNTHESIS_WORKSPACE_QUBITS`` (or
+``SYNTHESIS_PER_REFLECTION_INTERCEPT``) in closed form from
+QROAMClean's optimizer expression. The empirical fits this cycle
+pinned (``alpha_t ≈ 0.275`` at N=256, b=32) are a concrete asymptotic
+constraint any candidate closed form must reproduce, alongside the
+``n_blocks``/``n_rows`` monotonicity and ``b=0`` intercept tables.
+A natural intermediate step before that is to add a small
+``scripts/regenerate_synthesis_tables.py`` helper that extracts the
+two tabulated dicts directly from the bloq, so re-tabulation under a
+QROAMClean upstream change becomes a one-command operation rather
+than a manual edit.
+=== claude cycle ended: Sat May 16 cycle 15 ===

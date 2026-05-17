@@ -55,6 +55,7 @@ from integrations.qualtran.model_resource_counts import (
     block_unitary_synthesis_workspace_qubits,
     ceil_log2,
     optimize_block_unitary_interferometer,
+    power_law_fit,
 )
 
 
@@ -447,6 +448,29 @@ def test_plot_report_generates_pdf(tmp_path=None):
     assert _os.path.exists(out_pdf)
     assert _os.path.getsize(out_pdf) > 0
     assert len(t_opt) == 2 and len(q_opt) == 2
+
+
+def test_synthesis_panel_power_law_sublinear():
+    """Synthesis Toffoli/total-qubit power-law fit alphas must be sub-linear.
+
+    At the canonical report parameters (N=256, b=32, K=block_dim) the
+    synthesis cost is dominated by the per-reflection ``slope*b`` term, but
+    the ``n_blocks`` dependence still comes only from ``I_1(n_blocks, N)``
+    and ``workspace_qubits``, both of which grow sub-linearly with
+    ``n_blocks``. This is the report-visible signature of the QROAMClean
+    amortization pinned by ``test_block_unitary_synthesis_amortization``,
+    and is the property the summary page's ``synth_t``/``synth_q`` fits
+    advertise. A regression that broke sub-linearity (e.g. an accidental
+    per-block QROAM table) would surface here without needing to re-run
+    the Bloq.
+    """
+    pytest.importorskip("numpy")
+    recs = _synthesis_panel_records(n_rows=256, bitsize=32, n_reflections=256)
+    xs = [r.n_blocks for r in recs]
+    alpha_t, _ = power_law_fit(xs, [r.toffoli for r in recs])
+    alpha_q, _ = power_law_fit(xs, [r.total_qubits for r in recs])
+    assert 0.0 <= alpha_t < 1.0, alpha_t
+    assert 0.0 <= alpha_q < 1.0, alpha_q
 
 
 def test_optimal_log_block_sizes_returns_non_negative():
