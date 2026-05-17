@@ -1142,3 +1142,94 @@ two tabulated dicts directly from the bloq, so re-tabulation under a
 QROAMClean upstream change becomes a one-command operation rather
 than a manual edit.
 === claude cycle ended: Sat May 16 cycle 15 ===
+=== claude cycle ended: Sat May 16 09:45:37 PM PDT 2026 ===
+=== claude cycle started: Sat May 16 09:46:37 PM PDT 2026 ===
+
+## Cycle 16 — 2026-05-16
+
+**Inbox:** AUTONOMOUS_INBOX.md (2026-05-16) — "send me a pdf report
+each time, with math equations rendered as latex". A LaTeX-rendered
+PDF deliverable for this cycle is at
+``docs/cycle_reports/cycle16_report.pdf`` (math via matplotlib
+mathtext; no external LaTeX install required). An attempt to email it
+via the existing ``email_report`` SMTP path was denied by the harness'
+auto-mode classifier as unauthorized external communication; the user
+can pick up the file locally or add an explicit Bash permission rule
+for ``sendmail`` if they want future cycles to email automatically.
+
+**Task selected:** Resume cycle 15's recommended next task in its
+*intermediate* form — add a small ``scripts/regenerate_synthesis_tables.py``
+helper that extracts ``SYNTHESIS_PER_REFLECTION_INTERCEPT`` and
+``SYNTHESIS_WORKSPACE_QUBITS`` directly from
+``BlockUnitarySynthesisQROAM`` so re-tabulation under a QROAMClean
+upstream change is a one-command operation rather than a manual edit.
+This is the safer intermediate step before deriving the dicts in
+closed form. The full closed-form derivation remains the open follow-up.
+
+**Major changes:**
+- New ``scripts/regenerate_synthesis_tables.py``:
+  - ``extract_intercept(n_blocks, n_rows)`` subtracts the
+    ``2*(log2(N)+1)*b_ref`` slope contribution from
+    ``QECGatesCost(bloq).toffoli`` to recover the per-reflection
+    ``b=0`` intercept ``I_1``.
+  - ``extract_workspace(n_blocks, n_rows, bitsize)`` subtracts
+    ``signature.n_qubits()`` from ``QubitCount(bloq)``.
+  - ``regenerate_intercept_table`` / ``regenerate_workspace_table``
+    sweep the same 49-point and 245-point grids the shipped dicts
+    cover.
+  - ``--check`` (default) diffs the regenerated dicts against the
+    shipped tables and exits non-zero on drift; ``--print`` emits
+    Python source ready to paste back into ``model_resource_counts.py``;
+    ``--no-workspace`` skips the slower workspace sweep.
+- New ``tests/test_regenerate_synthesis_tables.py`` (4 tests):
+  - ``extract_intercept`` matches the shipped lookup on a 4-point
+    corner sample.
+  - ``extract_workspace`` matches the shipped lookup on a 3-point
+    corner sample.
+  - ``_format_intercept_table`` / ``_format_workspace_table`` emit
+    ``ast.literal_eval``-roundtrippable Python source.
+- New ``scripts/_cycle16_report.py`` (private helper for this cycle's
+  PDF deliverable; not part of the shipped report pipeline).
+- New ``docs/cycle_reports/cycle16_report.pdf`` (the cycle deliverable
+  per the inbox instruction).
+
+**Files changed:**
+- Added: ``scripts/regenerate_synthesis_tables.py``
+- Added: ``scripts/_cycle16_report.py``
+- Added: ``tests/test_regenerate_synthesis_tables.py``
+- Added: ``docs/cycle_reports/cycle16_report.pdf``
+- Modified: ``AUTONOMOUS_LOG.md``
+
+**Tests/checks run:**
+- ``PYTHONPATH=src python tests/test_regenerate_synthesis_tables.py``
+  → 4/4 passed.
+- ``PYTHONPATH=src python tests/test_block_unitary_synthesis_b_intercept.py``
+  → 6/6 passed (unaffected).
+- ``PYTHONPATH=src python tests/test_model_resource_counts.py``
+  → 31/31 passed (unaffected).
+- ``PYTHONPATH=src python scripts/regenerate_synthesis_tables.py``
+  (full intercept + workspace sweep) → ``SYNTHESIS_PER_REFLECTION_INTERCEPT:
+  OK (49 entries match)``; ``SYNTHESIS_WORKSPACE_QUBITS: OK (245
+  entries match)``.
+
+**Achieved goal:** Closed cycle-12+'s long-standing intermediate
+recommendation. The two tabulated dicts the analytic synthesis
+estimator depends on are now regenerable from the Bloq with a single
+command (``python scripts/regenerate_synthesis_tables.py``), so a
+QROAMClean upstream change is mechanically detectable and the dicts
+can be updated by paste-back rather than hand-edit. This guards
+GOALS.md "Improve constant factors in quantum algorithms" / "Any
+potential improvements on the final Toffoli complexity/qubit
+counts/scaling" by removing a manual maintenance gap from the
+production-side estimator infrastructure.
+
+**Next recommended task:** Derive ``I_1(n_blocks, n_rows)`` in closed
+form from QROAMClean's optimizer expression. The script added this
+cycle gives a one-command regression check for any candidate closed
+form against the bloq's ``QECGatesCost`` output. Concretely, the
+candidate form should reproduce the empirically observed
+``I_1(M, N) ~ c * sqrt(M*N)`` scaling (consistent with cycle 15's
+``alpha_T ≈ 0.275`` at ``N=256``), the ``n_blocks``/``n_rows``
+monotonicity invariants (cycles 10, 14), and the b-independent
+positivity for ``n_blocks >= 2`` (cycle 7).
+=== claude cycle ended: Sat May 16 cycle 16 ===
