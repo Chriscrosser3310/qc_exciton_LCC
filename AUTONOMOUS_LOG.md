@@ -775,3 +775,87 @@ cross-check analogous to ``test_block_unitary_synthesis_toffoli_matches_bloq``.
 That closes the qubit-side analytic-vs-Bloq guard on the synthesis
 path, mirroring what the Toffoli side already has.
 === claude cycle ended: Sat May 16 cycle 10 ===
+=== claude cycle ended: Sat May 16 09:18:26 PM PDT 2026 ===
+=== claude cycle started: Sat May 16 09:19:26 PM PDT 2026 ===
+
+## Cycle 11 — 2026-05-16
+
+**Task selected:** The cycle-10-recommended next task — populate the
+``SynthesisResourceCount.workspace_qubits`` field by tabulating
+``QubitCount(BlockUnitarySynthesisQROAM.from_shape(...)) -
+signature.n_qubits()`` across the same 49-point
+``(n_blocks, n_rows) ∈ {1,2,4,8,16,32,64} × {4,8,16,32,64,128,256}`` grid,
+parameterized by ``bitsize ∈ {2, 4, 8, 16, 32}``. With this in place the
+analytic synthesis estimator can predict total qubits (signature +
+workspace) and the qubit-side analytic-vs-Bloq guard mirrors the Toffoli
+side that ``test_block_unitary_synthesis_toffoli_matches_bloq`` already
+provides.
+
+**Major changes:**
+- ``src/integrations/qualtran/model_resource_counts.py``:
+  - New ``SYNTHESIS_WORKSPACE_QUBITS: dict[tuple[int, int, int], int]``
+    tabulating workspace qubits across the 245-point
+    ``49 × 5`` grid. Values extracted with ``n_reflections=1``; the
+    workspace is the *peak* over the reflection loop (not the sum) and
+    is independent of ``n_reflections``.
+  - New ``block_unitary_synthesis_workspace_qubits(n_blocks, n_rows,
+    bitsize) -> int`` lookup helper; off-grid raises ``KeyError`` with
+    a clear message rather than silently extrapolating.
+  - ``SynthesisResourceCount`` extended with two new fields:
+    ``workspace_qubits`` and ``total_qubits``. The docstring is updated
+    to describe ``total_qubits = signature_qubits + workspace_qubits``
+    as the bloq's ``QubitCount`` value (no longer just a lower bound).
+  - ``block_unitary_synthesis_count`` now also calls the workspace
+    helper and populates ``workspace_qubits`` / ``total_qubits``.
+
+- ``tests/test_model_resource_counts.py`` (3 new tests, 23→26):
+  - ``test_block_unitary_synthesis_workspace_qubits_validates_inputs``
+    covers non-power-of-two ``n_rows`` / ``n_blocks``, non-positive
+    ``bitsize``, and off-grid ``KeyError`` paths (both off-grid
+    ``bitsize`` and off-grid ``n_blocks``).
+  - ``test_block_unitary_synthesis_workspace_table_consistent`` pins
+    that every cell of the 245-point grid is present and positive.
+  - ``test_block_unitary_synthesis_count_total_qubits_matches_bloq`` is
+    the load-bearing cross-check: for every ``(n_blocks, n_rows,
+    bitsize)`` in the table, ``block_unitary_synthesis_count(...).
+    total_qubits == get_cost_value(bloq, QubitCount())``. This is the
+    qubit-side analog of ``test_block_unitary_synthesis_toffoli_matches_bloq``.
+  - ``test_block_unitary_synthesis_count_composes_existing_estimators``
+    extended to also assert ``workspace_qubits`` and ``total_qubits``
+    fields.
+
+**Files changed:**
+- Modified: ``src/integrations/qualtran/model_resource_counts.py``
+- Modified: ``tests/test_model_resource_counts.py``
+
+**Tests/checks run:**
+- ``PYTHONPATH=src python tests/test_model_resource_counts.py``
+  → 26/26 passed (was 23/23).
+- ``PYTHONPATH=src python tests/test_block_unitary_synthesis_qubit_count.py``
+  → 5/5 passed (unaffected; the workspace monotonicity invariants this
+  file pins are preserved by the new tabulated values).
+- ``PYTHONPATH=src python tests/test_block_unitary_synthesis_b_intercept.py``
+  → 5/5 passed (unaffected).
+- ``PYTHONPATH=src python tests/test_block_unitary_synthesis_equivalence.py``
+  → 12/12 passed (unaffected).
+
+**Achieved goal:** Closed the qubit-side analytic-vs-Bloq guard on the
+synthesis path. ``block_unitary_synthesis_count`` now returns a fully
+populated ``SynthesisResourceCount`` whose ``total_qubits`` field equals
+the bloq's ``QubitCount`` exactly across the 245-point tabulated grid
+(GOALS.md "Improve constant factors in quantum algorithms" / "Any
+potential improvements on the final Toffoli complexity/qubit counts/
+scaling"). The synthesis estimator can now be plumbed into a report PDF
+panel without needing to re-run the bloq for qubit counts.
+
+**Next recommended task:** Add a synthesis-bloq panel to the report PDF
+generator (``_plot_report`` in ``model_resource_counts.py``). With the
+analytic estimator now fully populated for both Toffoli and total qubits,
+the panel can compare ``block_unitary_synthesis_count(...)`` curves
+across ``n_blocks`` at fixed ``N=256, bitsize=32`` (the report defaults)
+in the same plot style as the existing interferometer panels. The
+remaining longer-horizon task is to *derive* the workspace table in
+closed form from QROAMClean's optimizer (so the dict becomes a
+regression cache rather than the source of truth) — but that work is no
+longer gating any report-side use of the estimator.
+=== claude cycle ended: Sat May 16 cycle 11 ===

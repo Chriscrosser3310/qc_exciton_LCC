@@ -41,6 +41,7 @@ except ModuleNotFoundError:  # pragma: no cover - fallback for environments with
 
 from integrations.qualtran.model_resource_counts import (
     SYNTHESIS_PER_REFLECTION_INTERCEPT,
+    SYNTHESIS_WORKSPACE_QUBITS,
     SynthesisResourceCount,
     assert_power_of_two,
     block_unitary_interferometer_count,
@@ -49,6 +50,7 @@ from integrations.qualtran.model_resource_counts import (
     block_unitary_synthesis_count,
     block_unitary_synthesis_signature_qubits,
     block_unitary_synthesis_toffoli,
+    block_unitary_synthesis_workspace_qubits,
     ceil_log2,
     optimize_block_unitary_interferometer,
 )
@@ -276,7 +278,7 @@ def test_block_unitary_synthesis_signature_qubits_matches_bloq():
 
 
 def test_block_unitary_synthesis_count_composes_existing_estimators():
-    """``block_unitary_synthesis_count`` must compose the two analytic helpers."""
+    """``block_unitary_synthesis_count`` must compose the three analytic helpers."""
     for n_blocks, n_rows, b, K in [
         (1, 4, 2, 1),
         (8, 16, 4, 4),
@@ -288,6 +290,10 @@ def test_block_unitary_synthesis_count_composes_existing_estimators():
         assert rec.signature_qubits == block_unitary_synthesis_signature_qubits(
             n_blocks, n_rows, b
         )
+        assert rec.workspace_qubits == block_unitary_synthesis_workspace_qubits(
+            n_blocks, n_rows, b
+        )
+        assert rec.total_qubits == rec.signature_qubits + rec.workspace_qubits
         assert (rec.n_blocks, rec.n_rows, rec.bitsize, rec.n_reflections) == (
             n_blocks,
             n_rows,
@@ -304,6 +310,58 @@ def test_block_unitary_synthesis_count_propagates_validation():
         block_unitary_synthesis_count(1, 4, 0, 1)  # bitsize must be positive
     with pytest.raises(KeyError):
         block_unitary_synthesis_count(128, 4, 4, 1)  # off-grid intercept
+
+
+def test_block_unitary_synthesis_workspace_qubits_validates_inputs():
+    """``block_unitary_synthesis_workspace_qubits`` rejects bad inputs and off-grid points."""
+    with pytest.raises(ValueError):
+        block_unitary_synthesis_workspace_qubits(1, 3, 4)  # n_rows not power of two
+    with pytest.raises(ValueError):
+        block_unitary_synthesis_workspace_qubits(3, 4, 4)  # n_blocks not power of two
+    with pytest.raises(ValueError):
+        block_unitary_synthesis_workspace_qubits(1, 4, 0)  # bitsize must be positive
+    with pytest.raises(KeyError):
+        block_unitary_synthesis_workspace_qubits(1, 4, 7)  # bitsize off-grid
+    with pytest.raises(KeyError):
+        block_unitary_synthesis_workspace_qubits(128, 4, 4)  # n_blocks off-grid
+
+
+def test_block_unitary_synthesis_workspace_table_consistent():
+    """Pure-Python invariants on ``SYNTHESIS_WORKSPACE_QUBITS``.
+
+    The table is parameterized over the same ``(n_blocks, n_rows)`` 49-point
+    grid as ``SYNTHESIS_PER_REFLECTION_INTERCEPT`` and ``bitsize`` in
+    ``{2, 4, 8, 16, 32}``; every cell must be present and positive.
+    """
+    bitsizes = (2, 4, 8, 16, 32)
+    for (nb, N) in SYNTHESIS_PER_REFLECTION_INTERCEPT.keys():
+        for b in bitsizes:
+            assert (nb, N, b) in SYNTHESIS_WORKSPACE_QUBITS, (nb, N, b)
+            assert SYNTHESIS_WORKSPACE_QUBITS[(nb, N, b)] > 0
+
+
+def test_block_unitary_synthesis_count_total_qubits_matches_bloq():
+    """``total_qubits = signature + workspace`` must equal the Bloq's ``QubitCount`` exactly.
+
+    Cross-checks across the same 49-point grid x bitsizes the table covers.
+    This is the qubit-side analog of
+    ``test_block_unitary_synthesis_toffoli_matches_bloq``.
+    """
+    qualtran = pytest.importorskip("qualtran")
+    _ = qualtran
+    from qualtran.resource_counting import QubitCount, get_cost_value
+    from integrations.qualtran.block_unitary_synthesis_QROAM import (
+        BlockUnitarySynthesisQROAM,
+    )
+
+    for (nb, N) in SYNTHESIS_PER_REFLECTION_INTERCEPT.keys():
+        for b in (2, 4, 8, 16, 32):
+            rec = block_unitary_synthesis_count(nb, N, b, 1)
+            bloq = BlockUnitarySynthesisQROAM.from_shape(
+                n_blocks=nb, n_rows=N, phase_bitsize=b, n_reflections=1
+            )
+            qc = int(get_cost_value(bloq, QubitCount()))
+            assert rec.total_qubits == qc, (nb, N, b, rec.total_qubits, qc)
 
 
 def test_optimal_log_block_sizes_returns_non_negative():

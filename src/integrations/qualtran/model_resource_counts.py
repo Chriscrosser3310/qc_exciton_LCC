@@ -38,14 +38,18 @@ class ResourceCount:
 class SynthesisResourceCount:
     """Analytic resource estimate for ``BlockUnitarySynthesisQROAM``.
 
-    ``signature_qubits`` is a strict lower bound on peak logical qubits: it
-    counts only the persistent ``block + reflection_ancilla + system +
-    phase_gradient`` registers and omits the transient QROAMClean workspace,
-    which is not yet modeled analytically.
+    ``signature_qubits`` is the persistent ``block + reflection_ancilla +
+    system + phase_gradient`` register width. ``workspace_qubits`` is the
+    transient QROAMClean workspace (tabulated; see
+    ``SYNTHESIS_WORKSPACE_QUBITS``). ``total_qubits = signature_qubits +
+    workspace_qubits`` matches the bloq's ``QubitCount`` exactly across the
+    tabulated grid.
     """
 
     toffoli: int
     signature_qubits: int
+    workspace_qubits: int
+    total_qubits: int
     n_blocks: int
     n_rows: int
     bitsize: int
@@ -153,6 +157,86 @@ def block_unitary_synthesis_toffoli(
     return n_reflections * (slope * bitsize + intercept)
 
 
+# Transient QROAMClean workspace contribution
+# (``QubitCount(BlockUnitarySynthesisQROAM.from_shape(...)) - signature.n_qubits()``)
+# tabulated over the same 49-point ``(n_blocks, n_rows)`` grid as
+# ``SYNTHESIS_PER_REFLECTION_INTERCEPT`` plus ``bitsize`` in {2, 4, 8, 16, 32}.
+# Values were extracted at ``n_reflections=1`` and are independent of
+# ``n_reflections`` (each reflection reuses the same QROAMClean call graph;
+# the workspace is the peak across reflections, not the sum).
+SYNTHESIS_WORKSPACE_QUBITS: dict[tuple[int, int, int], int] = {
+    # bitsize = 2
+    (1, 4, 2): 6, (1, 8, 2): 8, (1, 16, 2): 9, (1, 32, 2): 13, (1, 64, 2): 14, (1, 128, 2): 22, (1, 256, 2): 23,
+    (2, 4, 2): 7, (2, 8, 2): 9, (2, 16, 2): 10, (2, 32, 2): 14, (2, 64, 2): 15, (2, 128, 2): 23, (2, 256, 2): 24,
+    (4, 4, 2): 8, (4, 8, 2): 10, (4, 16, 2): 11, (4, 32, 2): 15, (4, 64, 2): 16, (4, 128, 2): 24, (4, 256, 2): 25,
+    (8, 4, 2): 10, (8, 8, 2): 14, (8, 16, 2): 15, (8, 32, 2): 23, (8, 64, 2): 24, (8, 128, 2): 40, (8, 256, 2): 41,
+    (16, 4, 2): 11, (16, 8, 2): 15, (16, 16, 2): 16, (16, 32, 2): 24, (16, 64, 2): 25, (16, 128, 2): 41, (16, 256, 2): 42,
+    (32, 4, 2): 15, (32, 8, 2): 23, (32, 16, 2): 24, (32, 32, 2): 40, (32, 64, 2): 41, (32, 128, 2): 73, (32, 256, 2): 74,
+    (64, 4, 2): 16, (64, 8, 2): 24, (64, 16, 2): 25, (64, 32, 2): 41, (64, 64, 2): 42, (64, 128, 2): 74, (64, 256, 2): 75,
+    # bitsize = 4
+    (1, 4, 4): 8, (1, 8, 4): 9, (1, 16, 4): 13, (1, 32, 4): 14, (1, 64, 4): 22, (1, 128, 4): 23, (1, 256, 4): 39,
+    (2, 4, 4): 9, (2, 8, 4): 10, (2, 16, 4): 14, (2, 32, 4): 15, (2, 64, 4): 23, (2, 128, 4): 24, (2, 256, 4): 40,
+    (4, 4, 4): 10, (4, 8, 4): 11, (4, 16, 4): 15, (4, 32, 4): 16, (4, 64, 4): 24, (4, 128, 4): 25, (4, 256, 4): 41,
+    (8, 4, 4): 11, (8, 8, 4): 12, (8, 16, 4): 16, (8, 32, 4): 17, (8, 64, 4): 25, (8, 128, 4): 26, (8, 256, 4): 42,
+    (16, 4, 4): 15, (16, 8, 4): 16, (16, 16, 4): 24, (16, 32, 4): 25, (16, 64, 4): 41, (16, 128, 4): 42, (16, 256, 4): 74,
+    (32, 4, 4): 16, (32, 8, 4): 17, (32, 16, 4): 25, (32, 32, 4): 26, (32, 64, 4): 42, (32, 128, 4): 43, (32, 256, 4): 75,
+    (64, 4, 4): 24, (64, 8, 4): 25, (64, 16, 4): 41, (64, 32, 4): 42, (64, 64, 4): 74, (64, 128, 4): 75, (64, 256, 4): 139,
+    # bitsize = 8
+    (1, 4, 8): 12, (1, 8, 8): 13, (1, 16, 8): 14, (1, 32, 8): 22, (1, 64, 8): 23, (1, 128, 8): 39, (1, 256, 8): 40,
+    (2, 4, 8): 13, (2, 8, 8): 14, (2, 16, 8): 15, (2, 32, 8): 23, (2, 64, 8): 24, (2, 128, 8): 40, (2, 256, 8): 41,
+    (4, 4, 8): 14, (4, 8, 8): 15, (4, 16, 8): 16, (4, 32, 8): 24, (4, 64, 8): 25, (4, 128, 8): 41, (4, 256, 8): 42,
+    (8, 4, 8): 15, (8, 8, 8): 16, (8, 16, 8): 17, (8, 32, 8): 25, (8, 64, 8): 26, (8, 128, 8): 42, (8, 256, 8): 43,
+    (16, 4, 8): 16, (16, 8, 8): 17, (16, 16, 8): 18, (16, 32, 8): 26, (16, 64, 8): 27, (16, 128, 8): 43, (16, 256, 8): 44,
+    (32, 4, 8): 24, (32, 8, 8): 25, (32, 16, 8): 26, (32, 32, 8): 42, (32, 64, 8): 43, (32, 128, 8): 75, (32, 256, 8): 76,
+    (64, 4, 8): 25, (64, 8, 8): 26, (64, 16, 8): 27, (64, 32, 8): 43, (64, 64, 8): 44, (64, 128, 8): 76, (64, 256, 8): 77,
+    # bitsize = 16
+    (1, 4, 16): 20, (1, 8, 16): 21, (1, 16, 16): 22, (1, 32, 16): 23, (1, 64, 16): 39, (1, 128, 16): 40, (1, 256, 16): 72,
+    (2, 4, 16): 21, (2, 8, 16): 22, (2, 16, 16): 23, (2, 32, 16): 24, (2, 64, 16): 40, (2, 128, 16): 41, (2, 256, 16): 73,
+    (4, 4, 16): 22, (4, 8, 16): 23, (4, 16, 16): 24, (4, 32, 16): 25, (4, 64, 16): 41, (4, 128, 16): 42, (4, 256, 16): 74,
+    (8, 4, 16): 23, (8, 8, 16): 24, (8, 16, 16): 25, (8, 32, 16): 26, (8, 64, 16): 42, (8, 128, 16): 43, (8, 256, 16): 75,
+    (16, 4, 16): 24, (16, 8, 16): 25, (16, 16, 16): 26, (16, 32, 16): 27, (16, 64, 16): 43, (16, 128, 16): 44, (16, 256, 16): 76,
+    (32, 4, 16): 25, (32, 8, 16): 26, (32, 16, 16): 27, (32, 32, 16): 28, (32, 64, 16): 44, (32, 128, 16): 45, (32, 256, 16): 77,
+    (64, 4, 16): 41, (64, 8, 16): 42, (64, 16, 16): 43, (64, 32, 16): 44, (64, 64, 16): 76, (64, 128, 16): 77, (64, 256, 16): 141,
+    # bitsize = 32
+    (1, 4, 32): 36, (1, 8, 32): 37, (1, 16, 32): 38, (1, 32, 32): 39, (1, 64, 32): 40, (1, 128, 32): 72, (1, 256, 32): 73,
+    (2, 4, 32): 37, (2, 8, 32): 38, (2, 16, 32): 39, (2, 32, 32): 40, (2, 64, 32): 41, (2, 128, 32): 73, (2, 256, 32): 74,
+    (4, 4, 32): 38, (4, 8, 32): 39, (4, 16, 32): 40, (4, 32, 32): 41, (4, 64, 32): 42, (4, 128, 32): 74, (4, 256, 32): 75,
+    (8, 4, 32): 39, (8, 8, 32): 40, (8, 16, 32): 41, (8, 32, 32): 42, (8, 64, 32): 43, (8, 128, 32): 75, (8, 256, 32): 76,
+    (16, 4, 32): 40, (16, 8, 32): 41, (16, 16, 32): 42, (16, 32, 32): 43, (16, 64, 32): 44, (16, 128, 32): 76, (16, 256, 32): 77,
+    (32, 4, 32): 41, (32, 8, 32): 42, (32, 16, 32): 43, (32, 32, 32): 44, (32, 64, 32): 45, (32, 128, 32): 77, (32, 256, 32): 78,
+    (64, 4, 32): 42, (64, 8, 32): 43, (64, 16, 32): 44, (64, 32, 32): 45, (64, 64, 32): 46, (64, 128, 32): 78, (64, 256, 32): 79,
+}
+
+
+def block_unitary_synthesis_workspace_qubits(
+    n_blocks: int,
+    n_rows: int,
+    bitsize: int,
+) -> int:
+    """Return the tabulated QROAMClean workspace qubits for ``BlockUnitarySynthesisQROAM``.
+
+    Looked up from ``SYNTHESIS_WORKSPACE_QUBITS``. An untabulated
+    ``(n_blocks, n_rows, bitsize)`` raises ``KeyError`` rather than
+    silently extrapolating. The workspace is the peak transient
+    contribution; ``signature_qubits + workspace_qubits`` matches the
+    bloq's ``QubitCount`` exactly over the grid.
+    """
+
+    assert_power_of_two(n_rows, "n_rows")
+    assert_power_of_two(n_blocks, "n_blocks")
+    if bitsize <= 0:
+        raise ValueError("bitsize must be positive")
+    try:
+        return SYNTHESIS_WORKSPACE_QUBITS[(n_blocks, n_rows, bitsize)]
+    except KeyError as exc:
+        raise KeyError(
+            f"no tabulated synthesis workspace for n_blocks={n_blocks}, "
+            f"n_rows={n_rows}, bitsize={bitsize}; add an entry to "
+            "SYNTHESIS_WORKSPACE_QUBITS after extracting it from "
+            "QubitCount on BlockUnitarySynthesisQROAM.from_shape(...)"
+        ) from exc
+
+
 def block_unitary_synthesis_signature_qubits(
     n_blocks: int,
     n_rows: int,
@@ -181,17 +265,22 @@ def block_unitary_synthesis_count(
     bitsize: int,
     n_reflections: int,
 ) -> SynthesisResourceCount:
-    """Return the analytic Toffoli and signature-qubit estimate for the synthesis bloq.
+    """Return the analytic Toffoli and qubit estimate for the synthesis bloq.
 
-    Composes ``block_unitary_synthesis_toffoli`` and
-    ``block_unitary_synthesis_signature_qubits`` into a single record. The
-    qubit field is the persistent signature width and does not include the
-    transient QROAMClean workspace (see ``SynthesisResourceCount`` docstring).
+    Composes ``block_unitary_synthesis_toffoli``,
+    ``block_unitary_synthesis_signature_qubits``, and
+    ``block_unitary_synthesis_workspace_qubits`` into a single record.
+    ``total_qubits`` equals ``signature_qubits + workspace_qubits`` and
+    matches the bloq's ``QubitCount`` exactly across the tabulated grid.
     """
 
+    sig = block_unitary_synthesis_signature_qubits(n_blocks, n_rows, bitsize)
+    workspace = block_unitary_synthesis_workspace_qubits(n_blocks, n_rows, bitsize)
     return SynthesisResourceCount(
         toffoli=block_unitary_synthesis_toffoli(n_blocks, n_rows, bitsize, n_reflections),
-        signature_qubits=block_unitary_synthesis_signature_qubits(n_blocks, n_rows, bitsize),
+        signature_qubits=sig,
+        workspace_qubits=workspace,
+        total_qubits=sig + workspace,
         n_blocks=n_blocks,
         n_rows=n_rows,
         bitsize=bitsize,
