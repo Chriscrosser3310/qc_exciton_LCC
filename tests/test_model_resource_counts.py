@@ -40,10 +40,12 @@ except ModuleNotFoundError:  # pragma: no cover - fallback for environments with
     sys.modules["pytest"] = pytest  # type: ignore[assignment]
 
 from integrations.qualtran.model_resource_counts import (
+    SYNTHESIS_PER_REFLECTION_INTERCEPT,
     assert_power_of_two,
     block_unitary_interferometer_count,
     block_unitary_interferometer_qubits,
     block_unitary_interferometer_toffoli,
+    block_unitary_synthesis_toffoli,
     ceil_log2,
     optimize_block_unitary_interferometer,
 )
@@ -182,6 +184,55 @@ def test_estimator_matches_closed_form():
         )
         assert est.toffoli == ref.toffoli, (n_blocks, n_rows, b, l_load, l_final_adj)
         assert est.qubits == ref.qubits, (n_blocks, n_rows, b, l_load, l_final_adj)
+
+
+def test_block_unitary_synthesis_toffoli_validates_inputs():
+    with pytest.raises(ValueError):
+        block_unitary_synthesis_toffoli(1, 3, 4, 1)  # n_rows not power of two
+    with pytest.raises(ValueError):
+        block_unitary_synthesis_toffoli(3, 4, 4, 1)  # n_blocks not power of two
+    with pytest.raises(ValueError):
+        block_unitary_synthesis_toffoli(1, 4, 0, 1)  # bitsize must be positive
+    with pytest.raises(ValueError):
+        block_unitary_synthesis_toffoli(1, 4, 4, 0)  # n_reflections must be positive
+    with pytest.raises(ValueError):
+        block_unitary_synthesis_toffoli(1, 4, 4, 5)  # n_reflections > n_rows
+    with pytest.raises(KeyError):
+        block_unitary_synthesis_toffoli(32, 4, 4, 1)  # missing intercept entry
+
+
+def test_block_unitary_synthesis_toffoli_decomposition_identity():
+    """Analytic count must match ``K * (slope*b + I_1)`` exactly."""
+    import math as _math
+
+    for (n_blocks, N), I_1 in SYNTHESIS_PER_REFLECTION_INTERCEPT.items():
+        slope = 2 * (int(_math.log2(N)) + 1)
+        for b in (2, 4, 8, 12):
+            for K in (1, max(1, N // 2), N):
+                assert block_unitary_synthesis_toffoli(
+                    n_blocks, N, b, K
+                ) == K * (slope * b + I_1)
+
+
+def test_block_unitary_synthesis_toffoli_matches_bloq():
+    """Analytic estimator and the Bloq's QECGatesCost agree exactly on the grid."""
+    qualtran = pytest.importorskip("qualtran")
+    _ = qualtran
+    from qualtran.resource_counting import QECGatesCost, get_cost_value
+
+    from integrations.qualtran.block_unitary_synthesis_QROAM import (
+        BlockUnitarySynthesisQROAM,
+    )
+
+    for (n_blocks, N) in SYNTHESIS_PER_REFLECTION_INTERCEPT:
+        for b in (2, 4, 8):
+            for K in (1, max(1, N // 2), N):
+                bloq = BlockUnitarySynthesisQROAM.from_shape(
+                    n_blocks=n_blocks, n_rows=N, phase_bitsize=b, n_reflections=K
+                )
+                bloq_t = get_cost_value(bloq, QECGatesCost()).toffoli
+                analytic_t = block_unitary_synthesis_toffoli(n_blocks, N, b, K)
+                assert bloq_t == analytic_t, (n_blocks, N, b, K, bloq_t, analytic_t)
 
 
 def test_optimal_log_block_sizes_returns_non_negative():

@@ -75,6 +75,62 @@ def assert_power_of_two(x: int, name: str) -> None:
         raise ValueError(f"{name} must be a positive power of two, got {x}")
 
 
+# Per-reflection b=0 intercept I_1(n_blocks, N) for
+# BlockUnitarySynthesisQROAM, pinned by
+# ``tests/test_block_unitary_synthesis_b_intercept.py``. Combined with the
+# K-linear, b-affine, slope-= 2*(log2(N)+1) identities from
+# ``tests/test_block_unitary_synthesis_scaling.py`` it gives the closed-form
+# decomposition
+#
+#     T(n_blocks, N, K, b) = K * (2 * (log2(N) + 1) * b + I_1(n_blocks, N)).
+#
+# The table is the analytic-side anchor; any QROAMClean upstream change that
+# moves these values will surface both here and in the b-intercept test.
+SYNTHESIS_PER_REFLECTION_INTERCEPT: dict[tuple[int, int], int] = {
+    (1, 4): -6, (2, 4): 4,  (4, 4): 12, (8, 4): 32, (16, 4): 48,
+    (1, 8): -2, (2, 8): 16, (4, 8): 28, (8, 8): 64, (16, 8): 88,
+    (1, 16): 6, (2, 16): 32, (4, 16): 52, (8, 16): 104, (16, 16): 144,
+}
+
+
+def block_unitary_synthesis_toffoli(
+    n_blocks: int,
+    n_rows: int,
+    bitsize: int,
+    n_reflections: int,
+) -> int:
+    r"""Return the analytic Toffoli count for ``BlockUnitarySynthesisQROAM``.
+
+    Implements the decomposition
+
+        ``T = K * (2 * (log2(N) + 1) * b + I_1(n_blocks, N))``
+
+    pinned by the ``tests/test_block_unitary_synthesis_*`` family. The
+    per-reflection intercept ``I_1`` is looked up from
+    ``SYNTHESIS_PER_REFLECTION_INTERCEPT``; an unknown
+    ``(n_blocks, n_rows)`` raises ``KeyError`` rather than silently
+    extrapolating.
+    """
+
+    assert_power_of_two(n_rows, "n_rows")
+    assert_power_of_two(n_blocks, "n_blocks")
+    if min(bitsize, n_reflections) <= 0:
+        raise ValueError("bitsize and n_reflections must be positive")
+    if n_reflections > n_rows:
+        raise ValueError("n_reflections must be <= n_rows")
+    try:
+        intercept = SYNTHESIS_PER_REFLECTION_INTERCEPT[(n_blocks, n_rows)]
+    except KeyError as exc:
+        raise KeyError(
+            f"no tabulated synthesis intercept for n_blocks={n_blocks}, "
+            f"n_rows={n_rows}; add an entry to "
+            "SYNTHESIS_PER_REFLECTION_INTERCEPT after pinning it in "
+            "tests/test_block_unitary_synthesis_b_intercept.py"
+        ) from exc
+    slope = 2 * (int(math.log2(n_rows)) + 1)
+    return n_reflections * (slope * bitsize + intercept)
+
+
 def block_unitary_interferometer_toffoli(
     num_blocks: int,
     block_dim: int,

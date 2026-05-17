@@ -342,3 +342,85 @@ analogous to ``test_estimator_matches_closed_form`` for the
 interferometer — that closes the modelling gap cycles 3–5 have been
 incrementally building toward.
 === claude cycle ended: Sun May 17 cycle 5 ===
+=== claude cycle ended: Sat May 16 08:05:50 PM PDT 2026 ===
+=== claude cycle started: Sat May 16 08:06:50 PM PDT 2026 ===
+
+## Cycle 6 — 2026-05-16
+
+**Task selected:** The cycle-5-recommended next task — add a
+``block_unitary_synthesis_toffoli`` function in
+``src/integrations/qualtran/model_resource_counts.py`` parameterized as
+``K * (2*(log2(N)+1)*b + I_1(n_blocks, N))``, with ``I_1`` looked up
+from a tabulated intercept table (the conservative first-pass option
+cycle 5 outlined), and add a ``test_block_unitary_synthesis_toffoli_matches_bloq``
+cross-check that the analytic estimator equals the Bloq-side
+``QECGatesCost`` Toffoli count over the pinned grid. This closes the
+modelling gap cycles 3–5 were incrementally building toward: the
+synthesis path now has the same analytic-vs-Bloq guard the
+interferometer path already has via ``test_estimator_matches_closed_form``.
+
+**Major changes:**
+- ``src/integrations/qualtran/model_resource_counts.py``:
+  - New ``SYNTHESIS_PER_REFLECTION_INTERCEPT`` dict (the 15-point
+    ``(n_blocks, n_rows) ∈ {1,2,4,8,16} × {4,8,16}`` table). The values
+    are identical to ``REFERENCE`` in
+    ``tests/test_block_unitary_synthesis_b_intercept.py`` — the two
+    constants are intentionally kept in sync; a divergence on either
+    side is a regression signal.
+  - New ``block_unitary_synthesis_toffoli(n_blocks, n_rows, bitsize,
+    n_reflections)`` returning ``K * (2*(log2(N)+1)*b + I_1)``. Validates
+    that ``n_blocks`` and ``n_rows`` are powers of two,
+    ``n_reflections <= n_rows``, ``bitsize > 0``, ``n_reflections > 0``,
+    and raises ``KeyError`` rather than extrapolating off the tabulated
+    grid.
+- ``tests/test_model_resource_counts.py``:
+  - ``test_block_unitary_synthesis_toffoli_validates_inputs`` — covers
+    the input-validation branches and the off-grid ``KeyError`` path.
+  - ``test_block_unitary_synthesis_toffoli_decomposition_identity`` —
+    pure-Python check that the function returns exactly
+    ``K * (slope*b + I_1)`` for ``(b, K) ∈ {2,4,8,12} × {1, N/2, N}``
+    across every entry of ``SYNTHESIS_PER_REFLECTION_INTERCEPT``.
+  - ``test_block_unitary_synthesis_toffoli_matches_bloq`` — the
+    load-bearing cross-check: for every grid point and ``b ∈ {2,4,8}``,
+    ``K ∈ {1, N/2, N}``, the analytic estimator equals
+    ``get_cost_value(BlockUnitarySynthesisQROAM.from_shape(...),
+    QECGatesCost()).toffoli`` exactly. This is the synthesis-side
+    analog of ``test_estimator_matches_closed_form``.
+
+**Files changed:**
+- Modified: ``src/integrations/qualtran/model_resource_counts.py``
+- Modified: ``tests/test_model_resource_counts.py`` (3 new tests)
+
+**Tests/checks run:**
+- ``PYTHONPATH=src python tests/test_model_resource_counts.py``
+  → 18/18 passed (was 15/15 — added 3 synthesis-side tests).
+- ``PYTHONPATH=src python tests/test_block_unitary_synthesis_b_intercept.py``
+  → 5/5 passed (unaffected; confirms the intercept table is still
+  faithful to the Bloq).
+- ``PYTHONPATH=src python tests/test_block_unitary_synthesis_scaling.py``
+  → 6/6 passed (unaffected).
+- ``PYTHONPATH=src python tests/test_block_unitary_synthesis_amortization.py``
+  → 5/5 passed (unaffected).
+- ``PYTHONPATH=src python tests/test_block_unitary_synthesis_equivalence.py``
+  → 12/12 passed (unaffected).
+
+**Achieved goal:** Closed the analytic-vs-Bloq modelling gap on the
+synthesis path (GOALS.md "Improve constant factors in quantum
+algorithms"). The synthesis bloq's Toffoli cost is now predictable from
+a pure-Python closed-form expression with a single tabulated lookup,
+and any future change that perturbs either side surfaces as an
+explicit test failure rather than silent drift in the report numbers.
+
+**Next recommended task:** Derive ``I_1(n_blocks, N)`` in closed form
+from the Qualtran ``QROAMClean`` cost expression — table length
+``M = n_blocks * 2^n``, output bitsize ``b``, optimal block size
+``k* ~ sqrt(M*b)`` — plus the per-reflection Hadamard /
+reflection-about-zero overhead. Once the closed form reproduces every
+entry of ``SYNTHESIS_PER_REFLECTION_INTERCEPT``, the dict becomes a
+regression cache rather than the source of truth, and the synthesis
+estimator extends to arbitrary ``(n_blocks, N)`` without needing to
+re-run the Bloq to populate new grid points. A natural follow-up after
+that is a ``block_unitary_synthesis_count`` wrapper that returns a
+full ``ResourceCount`` (including qubits) and a corresponding figure
+panel in the docs report.
+=== claude cycle ended: Sat May 16 cycle 6 ===
