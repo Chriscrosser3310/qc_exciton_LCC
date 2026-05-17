@@ -13,3 +13,6 @@ venv/
 build/
 dist/
 *.egg-info/
+
+# local autonomous-agent runtime state
+.auto-agent/
