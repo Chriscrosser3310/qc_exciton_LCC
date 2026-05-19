@@ -9,6 +9,15 @@ For each block A_k (size 2^n x 2^n) with SVD A_k = U_k Sigma_k V_k:
      and uncomputing via QROAMCleanAdjoint.
   3. Apply  sum_k |k><k| (x) U_k          via BlockUnitaryInterferometerSynthesisQROAM.
 
+Non-power-of-two matrix dimensions are supported by ``n_rows_logical = M``, where
+``M <= n_rows = 2^n`` is the true matrix dimension and ``n_rows`` is the smallest power
+of two at least M.  When set, two ``LessThanConstant(matrix_bitsize, M)`` comparators
+(input + output side, each computed then uncomputed) flag the indices
+``i >= M`` and OR the result into the block-encoding ancilla via a CNOT.  Combined
+with theta_{k,i} = pi/2 (sigma_{k,i} = 0) for i >= M, this turns the synthesized
+block encoding into a block encoding of the N x N zero-padded matrix A_pad whose
+top-left M x M block is A and whose other entries are zero.
+
 The class inherits from ``qualtran.bloqs.block_encoding.BlockEncoding`` so it can be
 plugged into anything that consumes the Qualtran ``BlockEncoding`` interface (QSVT,
 Qubitization-based phase estimation, hamiltonian simulation, ...).
@@ -26,6 +35,7 @@ from typing import Optional, Tuple, TYPE_CHECKING, Union
 import attrs
 
 from qualtran import Bloq, QAny, QBit, Register, Signature
+from qualtran.bloqs.arithmetic.comparison import LessThanConstant
 from qualtran.bloqs.block_encoding import BlockEncoding
 from qualtran.bloqs.block_encoding.lcu_block_encoding import PrepareIdentity
 from qualtran.bloqs.data_loading.qroam_clean import QROAMClean, QROAMCleanAdjoint
@@ -78,6 +88,10 @@ class SVDBlockEncodingInterferometer(BlockEncoding):
             final-phase QROAM uncomputation.
         diag_log_block_sizes: ``log_block_sizes`` for the diagonal angle QROAM forward load.
         diag_adjoint_log_block_sizes: ``log_block_sizes`` for the diagonal QROAM uncomputation.
+        n_rows_logical: optional logical row count $M \\le 2^n$; when set and strictly
+            less than ``n_rows``, the bloq adds comparator-based flagging of indices
+            $i \\ge M$ so the resulting block encoding represents the zero-padded matrix
+            $A_{\\text{pad}}$ (top-left $M \\times M$ block is $A$, all other entries are zero).
 
     Registers:
         system: combined (block, matrix) register of size ``block_bitsize + matrix_bitsize``
@@ -90,6 +104,7 @@ class SVDBlockEncodingInterferometer(BlockEncoding):
     n_rows: SymbolicInt
     phase_bitsize: SymbolicInt
     n_layers: Optional[SymbolicInt] = None
+    n_rows_logical: Optional[SymbolicInt] = None
     interferometer_log_block_sizes: Optional[Tuple[SymbolicInt, ...]] = attrs.field(
         default=None, converter=_to_tuple_or_none
     )
@@ -200,6 +215,27 @@ class SVDBlockEncodingInterferometer(BlockEncoding):
     def ctrl_phase_grad_add(self) -> Bloq:
         return AddIntoPhaseGrad(self.phase_bitsize, self.phase_bitsize).controlled()
 
+    @property
+    def has_logical_padding(self) -> bool:
+        """True iff a comparator-based projection out of the i >= n_rows_logical subspace is needed."""
+        if self.n_rows_logical is None:
+            return False
+        if is_symbolic(self.n_rows_logical) or is_symbolic(self.n_rows):
+            return True
+        return int(self.n_rows_logical) < int(self.n_rows)
+
+    @property
+    def comparator(self) -> Optional[Bloq]:
+        """LessThanConstant(matrix_bitsize, n_rows_logical) used to flag i >= M on the BE ancilla.
+
+        Comparator output is XORed into a workspace qubit then ORed into the BE ancilla;
+        each comparator is followed by its self-inverse uncompute, so the call graph holds
+        two LessThanConstant calls per side (input + output), times two sides.
+        """
+        if not self.has_logical_padding:
+            return None
+        return LessThanConstant(bitsize=self.matrix_bitsize, less_than_val=self.n_rows_logical)
+
     # ----------------------------- Resource counts ------------------------------
 
     def build_call_graph(self, ssa: "SympySymbolAllocator") -> "BloqCountDictT":
@@ -208,4 +244,10 @@ class SVDBlockEncodingInterferometer(BlockEncoding):
         ret[self.diag_qroam] += 1                    # load angles theta_{k,i}
         ret[self.ctrl_phase_grad_add] += 1           # Ry(2 theta) on BE ancilla
         ret[self.diag_qroam_adjoint] += 1            # uncompute angle register
+        if self.has_logical_padding:
+            # Two-sided projection: comparator (compute + uncompute) on the matrix
+            # register before V_k and after U_k.  Each side: 2 LessThanConstant calls
+            # (forward and self-inverse uncompute) writing a workspace bit that is
+            # CNOTed into the BE ancilla (CNOT is Clifford, zero Toffoli).
+            ret[self.comparator] += 4
         return ret
