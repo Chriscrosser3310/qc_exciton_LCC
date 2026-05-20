@@ -9,14 +9,15 @@ For each block A_k (size 2^n x 2^n) with SVD A_k = U_k Sigma_k V_k:
      and uncomputing via QROAMCleanAdjoint.
   3. Apply  sum_k |k><k| (x) U_k          via BlockUnitaryInterferometerSynthesisQROAM.
 
-Non-power-of-two matrix dimensions are supported by ``n_rows_logical = M``, where
-``M <= n_rows = 2^n`` is the true matrix dimension and ``n_rows`` is the smallest power
-of two at least M.  When set, two ``LessThanConstant(matrix_bitsize, M)`` comparators
-(input + output side, each computed then uncomputed) flag the indices
-``i >= M`` and OR the result into the block-encoding ancilla via a CNOT.  Combined
-with theta_{k,i} = pi/2 (sigma_{k,i} = 0) for i >= M, this turns the synthesized
-block encoding into a block encoding of the N x N zero-padded matrix A_pad whose
-top-left M x M block is A and whose other entries are zero.
+Non-power-of-two matrix dimensions are supported via ``n_rows_logical = M`` with
+``M <= n_rows = 2^n``.  Padding is implemented entirely by the *data* baked into the
+bloq's QROAM tables and interferometer angles: setting ``theta_{k,i} = pi/2``
+(equivalently ``sigma_{k,i} = 0``) for ``i >= M`` together with block-diagonal
+``U_pad``, ``V_pad`` (top-left ``M x M`` block carries ``U_M``, ``V_M``; bottom-right
+``(N-M) x (N-M)`` block is the identity) makes the synthesized block encoding represent
+the zero-padded ``A_pad``.  The circuit (and hence Toffoli / qubit cost) is the same
+as for ``M = N``: any explicit projection would be redundant once the data is set up
+this way.  ``n_rows_logical`` therefore acts as a documentation / consumer-side hint.
 
 The class inherits from ``qualtran.bloqs.block_encoding.BlockEncoding`` so it can be
 plugged into anything that consumes the Qualtran ``BlockEncoding`` interface (QSVT,
@@ -30,12 +31,13 @@ from __future__ import annotations
 
 from collections import Counter
 from functools import cached_property
-from typing import Optional, Tuple, TYPE_CHECKING, Union
+from typing import Dict, Optional, Tuple, TYPE_CHECKING, Union
 
 import attrs
+import numpy as np
 
-from qualtran import Bloq, QAny, QBit, Register, Signature
-from qualtran.bloqs.arithmetic.comparison import LessThanConstant
+from qualtran import Bloq, BloqBuilder, QAny, QBit, QUInt, Register, Signature, SoquetT
+from qualtran.bloqs.basic_gates import Hadamard
 from qualtran.bloqs.block_encoding import BlockEncoding
 from qualtran.bloqs.block_encoding.lcu_block_encoding import PrepareIdentity
 from qualtran.bloqs.data_loading.qroam_clean import QROAMClean, QROAMCleanAdjoint
@@ -89,9 +91,11 @@ class SVDBlockEncodingInterferometer(BlockEncoding):
         diag_log_block_sizes: ``log_block_sizes`` for the diagonal angle QROAM forward load.
         diag_adjoint_log_block_sizes: ``log_block_sizes`` for the diagonal QROAM uncomputation.
         n_rows_logical: optional logical row count $M \\le 2^n$; when set and strictly
-            less than ``n_rows``, the bloq adds comparator-based flagging of indices
-            $i \\ge M$ so the resulting block encoding represents the zero-padded matrix
-            $A_{\\text{pad}}$ (top-left $M \\times M$ block is $A$, all other entries are zero).
+            less than ``n_rows`` the block encoding represents the zero-padded matrix
+            $A_{\\text{pad}}$ (top-left $M \\times M$ block is $A$, all other entries are
+            zero).  Padding is enforced by the data fed into this bloq's QROAM tables
+            and synthesized U/V angles (block-diagonal extension, ``\\theta_{k,i} =
+            \\pi/2`` for ``i >= M``).  The circuit itself does not depend on ``M``.
 
     Registers:
         system: combined (block, matrix) register of size ``block_bitsize + matrix_bitsize``
@@ -215,27 +219,6 @@ class SVDBlockEncodingInterferometer(BlockEncoding):
     def ctrl_phase_grad_add(self) -> Bloq:
         return AddIntoPhaseGrad(self.phase_bitsize, self.phase_bitsize).controlled()
 
-    @property
-    def has_logical_padding(self) -> bool:
-        """True iff a comparator-based projection out of the i >= n_rows_logical subspace is needed."""
-        if self.n_rows_logical is None:
-            return False
-        if is_symbolic(self.n_rows_logical) or is_symbolic(self.n_rows):
-            return True
-        return int(self.n_rows_logical) < int(self.n_rows)
-
-    @property
-    def comparator(self) -> Optional[Bloq]:
-        """LessThanConstant(matrix_bitsize, n_rows_logical) used to flag i >= M on the BE ancilla.
-
-        Comparator output is XORed into a workspace qubit then ORed into the BE ancilla;
-        each comparator is followed by its self-inverse uncompute, so the call graph holds
-        two LessThanConstant calls per side (input + output), times two sides.
-        """
-        if not self.has_logical_padding:
-            return None
-        return LessThanConstant(bitsize=self.matrix_bitsize, less_than_val=self.n_rows_logical)
-
     # ----------------------------- Resource counts ------------------------------
 
     def build_call_graph(self, ssa: "SympySymbolAllocator") -> "BloqCountDictT":
@@ -244,10 +227,115 @@ class SVDBlockEncodingInterferometer(BlockEncoding):
         ret[self.diag_qroam] += 1                    # load angles theta_{k,i}
         ret[self.ctrl_phase_grad_add] += 1           # Ry(2 theta) on BE ancilla
         ret[self.diag_qroam_adjoint] += 1            # uncompute angle register
-        if self.has_logical_padding:
-            # Two-sided projection: comparator (compute + uncompute) on the matrix
-            # register before V_k and after U_k.  Each side: 2 LessThanConstant calls
-            # (forward and self-inverse uncompute) writing a workspace bit that is
-            # CNOTed into the BE ancilla (CNOT is Clifford, zero Toffoli).
-            ret[self.comparator] += 4
         return ret
+
+    # --------------------------- Composite circuit -----------------------------
+
+    def build_composite_bloq(self, bb: BloqBuilder, **soqs: SoquetT) -> Dict[str, SoquetT]:
+        r"""Wire the actual circuit:  V_k  ->  Sigma_k (QROAM + Ry + QROAM^dag)  ->  U_k.
+
+        The combined ``system`` register is split into ``block`` (upper
+        ``block_bitsize`` bits) and ``matrix`` (lower ``matrix_bitsize`` bits) and
+        rejoined at the end.
+
+        Non-power-of-2 logical row counts ``M = n_rows_logical < n_rows`` are handled
+        purely by the *data* that the caller bakes into this bloq's QROAM tables and
+        interferometer angles: setting ``theta_{k,i} = pi/2`` (so ``sigma_{k,i} = 0``)
+        for ``i >= M`` and choosing block-diagonal U_pad, V_pad makes
+        ``<0_anc| (U_pad)(R_y)(V_pad^dag) |0_anc>`` equal to ``A_pad`` (top-left
+        ``M x M`` block is ``A``, all other entries zero).  The circuit itself is
+        unchanged by ``n_rows_logical``.
+        """
+        if is_symbolic(self.n_blocks, self.n_rows, self.phase_bitsize):
+            raise NotImplementedError("build_composite_bloq requires concrete parameters")
+
+        has_block = int(self.n_blocks) > 1
+        system = soqs['system']
+        be_anc = soqs['ancilla']
+        phase_grad = soqs['resource']
+
+        # Split system into block (MSBs) and matrix (LSBs).
+        if has_block:
+            sys_arr = bb.split(system)
+            bb_size = int(self.block_bitsize)
+            block = bb.join(sys_arr[:bb_size], dtype=QUInt(self.block_bitsize))
+            matrix = bb.join(sys_arr[bb_size:], dtype=QUInt(self.matrix_bitsize))
+        else:
+            matrix = system
+
+        # ---- 1) V_k : block-unitary interferometer ----
+        intf = self.interferometer
+        v_in = {'system': matrix, 'phase_gradient': phase_grad}
+        if has_block:
+            v_in['block'] = block
+        v_out = bb.add_d(intf, **v_in)
+        matrix = v_out['system']
+        phase_grad = v_out['phase_gradient']
+        if has_block:
+            block = v_out['block']
+
+        # ---- 2) Diagonal Sigma_k stage ----
+        qroam = self.diag_qroam
+        qroam_adj = self.diag_qroam_adjoint
+        sel_names = [r.name for r in qroam.selection_registers]
+        if has_block:
+            q_in = {sel_names[0]: block, sel_names[1]: matrix}
+        else:
+            q_in = {sel_names[0]: matrix}
+        q_out = bb.add_d(qroam, **q_in)
+        if has_block:
+            block = q_out[sel_names[0]]
+            matrix = q_out[sel_names[1]]
+        else:
+            matrix = q_out[sel_names[0]]
+        phi = q_out['target0_']
+
+        # Ry(2*theta) on BE ancilla via Hadamard sandwich + controlled phase-grad add.
+        be_anc = bb.add(Hadamard(), q=be_anc)
+        be_anc, phi, phase_grad = bb.add(
+            self.ctrl_phase_grad_add, ctrl=be_anc, x=phi, phase_grad=phase_grad
+        )
+        be_anc = bb.add(Hadamard(), q=be_anc)
+
+        # QROAM uncompute (measurement-based; 0 Toffoli for the intermediate-style adjoint).
+        block_sizes = qroam.block_sizes
+        junk_arr = (
+            np.asarray(q_out['junk_target0_']) if 'junk_target0_' in q_out else np.array([])
+        )
+        adj_sel_names = [r.name for r in qroam_adj.selection_registers]
+        adj_target = next(iter(qroam_adj.target_registers))
+        adj_soqs: Dict[str, SoquetT] = {
+            adj_target.name: np.array([phi, *junk_arr]).reshape(block_sizes)
+        }
+        if has_block:
+            adj_soqs[adj_sel_names[0]] = block
+            adj_soqs[adj_sel_names[1]] = matrix
+        else:
+            adj_soqs[adj_sel_names[0]] = matrix
+        adj_out = bb.add_d(qroam_adj, **adj_soqs)
+        if has_block:
+            block = adj_out[adj_sel_names[0]]
+            matrix = adj_out[adj_sel_names[1]]
+        else:
+            matrix = adj_out[adj_sel_names[0]]
+
+        # ---- 3) U_k : block-unitary interferometer ----
+        u_in = {'system': matrix, 'phase_gradient': phase_grad}
+        if has_block:
+            u_in['block'] = block
+        u_out = bb.add_d(intf, **u_in)
+        matrix = u_out['system']
+        phase_grad = u_out['phase_gradient']
+        if has_block:
+            block = u_out['block']
+
+        # Rejoin system register.
+        if has_block:
+            system = bb.join(
+                np.concatenate([bb.split(block), bb.split(matrix)]),
+                dtype=QAny(self.system_bitsize),
+            )
+        else:
+            system = matrix
+
+        return {'system': system, 'ancilla': be_anc, 'resource': phase_grad}
