@@ -208,11 +208,14 @@ class SVDBlockEncodingInterferometer(BlockEncoding):
 
     @property
     def diag_qroam_adjoint(self) -> QROAMCleanAdjoint:
-        lbs = self._capped_diag_lbs(self.diag_adjoint_log_block_sizes)
-        target_shapes = (tuple(1 << b for b in lbs),) if lbs is not None else None
-        kwargs = dict(target_bitsizes=(self.phase_bitsize,), log_block_sizes=lbs)
-        if target_shapes is not None:
-            kwargs['target_shapes'] = target_shapes
+        # target_shapes must equal the *forward* QROAM block_sizes (that is the shape
+        # of the target+junk registers the adjoint receives).  log_block_sizes is
+        # independent and tunes the adjoint's own measurement-based uncompute.
+        adj_lbs = self._capped_diag_lbs(self.diag_adjoint_log_block_sizes)
+        fwd_lbs = self._capped_diag_lbs(self.diag_log_block_sizes)
+        kwargs = dict(target_bitsizes=(self.phase_bitsize,), log_block_sizes=adj_lbs)
+        if fwd_lbs is not None:
+            kwargs['target_shapes'] = (tuple(1 << b for b in fwd_lbs),)
         return QROAMCleanAdjoint.build_from_bitsize(self.diag_data_shape, **kwargs)
 
     @property
@@ -298,14 +301,15 @@ class SVDBlockEncodingInterferometer(BlockEncoding):
         be_anc = bb.add(Hadamard(), q=be_anc)
 
         # QROAM uncompute (measurement-based; 0 Toffoli for the intermediate-style adjoint).
-        block_sizes = qroam.block_sizes
+        # Reshape forward's (target + junk) into the adjoint's expected target shape,
+        # which equals the forward QROAM's block_sizes by construction.
         junk_arr = (
             np.asarray(q_out['junk_target0_']) if 'junk_target0_' in q_out else np.array([])
         )
         adj_sel_names = [r.name for r in qroam_adj.selection_registers]
         adj_target = next(iter(qroam_adj.target_registers))
         adj_soqs: Dict[str, SoquetT] = {
-            adj_target.name: np.array([phi, *junk_arr]).reshape(block_sizes)
+            adj_target.name: np.array([phi, *junk_arr]).reshape(qroam_adj.target_shapes[0])
         }
         if has_block:
             adj_soqs[adj_sel_names[0]] = block
