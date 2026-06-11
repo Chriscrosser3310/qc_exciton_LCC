@@ -48,6 +48,9 @@ from integrations.qualtran.block_unitary_interferometer_QROAM import (
 from integrations.qualtran.svd_block_encoding_interferometer import (
     SVDBlockEncodingInterferometer,
 )
+from integrations.qualtran.rectangular_block_encoding_reflection import (
+    ReflectionRectangularBlockEncoding,
+)
 from integrations.qualtran.utils import get_Toffoli_counts, get_qubit_counts
 
 K = 8
@@ -55,7 +58,7 @@ N_VALUES = [2, 3, 4, 5, 6, 7]
 PHASE_BITSIZE = 32
 SWEEP_LBS = list(range(0, 12))
 OUT_PDF = os.path.join(
-    REPO_ROOT, "docs", f"svd_vs_dilation_blockencoding_K{K}_b{PHASE_BITSIZE}.pdf"
+    REPO_ROOT, "docs", f"svd_vs_dilation_blockencoding_K{K}_b{PHASE_BITSIZE}_controlled.pdf"
 )
 RECIPIENT = "jchen9@caltech.edu"
 
@@ -76,8 +79,8 @@ def _cap(lbs: int, max_lbs: int) -> int:
     return max(0, min(int(lbs), int(max_lbs)))
 
 
-def interferometer_cost(n_blocks: int, n_rows: int, lbs: int):
-    bloq = BlockUnitaryInterferometerSynthesisQROAM(
+def _interferometer_inner(n_blocks: int, n_rows: int, lbs: int) -> BlockUnitaryInterferometerSynthesisQROAM:
+    return BlockUnitaryInterferometerSynthesisQROAM(
         n_blocks=n_blocks,
         n_rows=n_rows,
         phase_bitsize=PHASE_BITSIZE,
@@ -86,6 +89,12 @@ def interferometer_cost(n_blocks: int, n_rows: int, lbs: int):
         final_log_block_sizes=_lbs_for_2d(lbs, n_blocks),
         final_adjoint_log_block_sizes=_lbs_for_2d(lbs, n_blocks),
     )
+
+
+def interferometer_cost(n_blocks: int, n_rows: int, lbs: int):
+    # Controlled wrapper: only AddIntoPhaseGrad ops get the extra control,
+    # so QROAM / Hadamards / AddK stay uncontrolled.
+    bloq = _interferometer_inner(n_blocks, n_rows, lbs).controlled()
     return int(get_Toffoli_counts(bloq)), int(get_qubit_counts(bloq))
 
 
@@ -160,7 +169,7 @@ def optimize_diagonal(n_blocks: int, n_rows: int) -> tuple[Rec, Rec]:
 
 
 def _make_svd_bloq(n_blocks: int, n_rows: int, intf_lbs, diag_fwd_lbs, diag_adj_lbs):
-    return SVDBlockEncodingInterferometer(
+    inner = SVDBlockEncodingInterferometer(
         n_blocks=n_blocks,
         n_rows=n_rows,
         phase_bitsize=PHASE_BITSIZE,
@@ -171,6 +180,7 @@ def _make_svd_bloq(n_blocks: int, n_rows: int, intf_lbs, diag_fwd_lbs, diag_adj_
         diag_log_block_sizes=_lbs_for_2d(diag_fwd_lbs, n_blocks),
         diag_adjoint_log_block_sizes=_lbs_for_2d(diag_adj_lbs, n_blocks),
     )
+    return inner.controlled()
 
 
 def _svd_eval(n_blocks: int, n_rows: int, intf_lbs: int, dfwd: int, dadj: int) -> Rec:
@@ -200,12 +210,12 @@ def svd_total(n_blocks: int, n: int) -> tuple[Rec, Rec]:
     fwd_recs = []
     adj_recs = []
     for lbs in SWEEP_LBS:
-        bloq_template = _make_svd_bloq(n_blocks, n_rows, 0, lbs, 0)
+        bloq_template = _make_svd_bloq(n_blocks, n_rows, 0, lbs, 0).inner
         try:
             fwd_recs.append((lbs, *_qroam_T_Q(bloq_template.diag_qroam)))
         except Exception:
             pass
-        bloq_template = _make_svd_bloq(n_blocks, n_rows, 0, 0, lbs)
+        bloq_template = _make_svd_bloq(n_blocks, n_rows, 0, 0, lbs).inner
         try:
             adj_recs.append((lbs, *_qroam_T_Q(bloq_template.diag_qroam_adjoint)))
         except Exception:
@@ -231,6 +241,47 @@ def dilation_total(n_blocks: int, n: int) -> tuple[Rec, Rec]:
     return Rec(topt.toffoli, topt.qubits, ("intf", topt.lbs)), Rec(qopt.toffoli, qopt.qubits, ("intf", qopt.lbs))
 
 
+def _distribute_lbs(lbs_total: int, dim_caps):
+    """Greedy: fill from the last (largest) dim first up to floor(log2(dim))."""
+    result = [0] * len(dim_caps)
+    rem = lbs_total
+    for i in range(len(dim_caps) - 1, -1, -1):
+        take = min(rem, dim_caps[i])
+        result[i] = take
+        rem -= take
+    return tuple(result)
+
+
+def reflection_total(n_blocks: int, n: int) -> tuple[Rec, Rec]:
+    """Reflection-isometry BE: per-reflection QROAM data shape is (K, N).
+
+    alpha = 1 (Householder isometry synthesis); n_reflections = N for a fully
+    square A_k.  Toffoli cost ~ N x sqrt(K*N*b).
+    """
+    N = 1 << n
+    caps = (int(np.log2(n_blocks)), n) if n_blocks > 1 else (n,)
+
+    def _build(f_lbs, a_lbs):
+        inner = ReflectionRectangularBlockEncoding(
+            n_blocks=n_blocks, n_rows=N, phase_bitsize=PHASE_BITSIZE,
+            amp_log_block_sizes=tuple(f_lbs),
+            amp_adjoint_log_block_sizes=tuple(a_lbs),
+            phase_log_block_sizes=tuple(f_lbs),
+            phase_adjoint_log_block_sizes=tuple(a_lbs),
+        )
+        bloq = inner.controlled()
+        return Rec(int(get_Toffoli_counts(bloq)), int(get_qubit_counts(bloq)),
+                   ("fwd", tuple(f_lbs), "adj", tuple(a_lbs)))
+
+    log_M = sum(caps)
+    fwd_total = max(0, min((log_M + int(np.log2(PHASE_BITSIZE))) // 2, log_M))
+    adj_total = max(0, min(log_M // 2, log_M))
+    t_opt = _build(_distribute_lbs(fwd_total, caps), _distribute_lbs(adj_total, caps))
+    zero = tuple([0] * len(caps))
+    q_opt = _build(zero, zero)
+    return t_opt, q_opt
+
+
 print("=" * 78)
 print("SVD vs direct-dilation block-encoding for K blocks of 2^n x 2^n matrices")
 print(f"  K = {K}, n in {N_VALUES}, phase_bitsize = {PHASE_BITSIZE}")
@@ -240,19 +291,25 @@ svd_topt: list[Rec] = []
 svd_qopt: list[Rec] = []
 dil_topt: list[Rec] = []
 dil_qopt: list[Rec] = []
+ref_topt: list[Rec] = []
+ref_qopt: list[Rec] = []
 for n in N_VALUES:
     print(f"n={n} (matrix dim={1 << n})")
     st, sq = svd_total(K, n)
     dt, dq = dilation_total(K, n)
+    rt, rq = reflection_total(K, n)
     svd_topt.append(st); svd_qopt.append(sq)
     dil_topt.append(dt); dil_qopt.append(dq)
+    ref_topt.append(rt); ref_qopt.append(rq)
     print(f"  SVD  T-opt: T={st.toffoli:,} Q={st.qubits}; Q-opt: T={sq.toffoli:,} Q={sq.qubits}")
     print(f"  Dil  T-opt: T={dt.toffoli:,} Q={dt.qubits}; Q-opt: T={dq.toffoli:,} Q={dq.qubits}")
+    print(f"  Refl T-opt: T={rt.toffoli:,} Q={rt.qubits}; Q-opt: T={rq.toffoli:,} Q={rq.qubits} (alpha=1, isometry)")
 
 n_arr = np.asarray(N_VALUES, dtype=float)
 series = {
     "svd_topt": svd_topt, "svd_qopt": svd_qopt,
     "dil_topt": dil_topt, "dil_qopt": dil_qopt,
+    "ref_topt": ref_topt, "ref_qopt": ref_qopt,
 }
 arrs_t = {k: np.asarray([r.toffoli for r in v], dtype=float) for k, v in series.items()}
 arrs_q = {k: np.asarray([r.qubits for r in v], dtype=float) for k, v in series.items()}
@@ -276,10 +333,12 @@ for name, (a, c) in fits.items():
 
 
 STYLES = {
-    "svd_topt": ("SVD, Toffoli-opt", "#1f77b4", "o"),
-    "svd_qopt": ("SVD, qubit-opt",   "#2ca02c", "s"),
-    "dil_topt": ("Dilation, Toffoli-opt", "#d62728", "^"),
-    "dil_qopt": ("Dilation, qubit-opt",   "#9467bd", "D"),
+    "svd_topt": ("SVD, Toffoli-opt",            "#1f77b4", "o"),
+    "svd_qopt": ("SVD, qubit-opt",              "#2ca02c", "s"),
+    "dil_topt": ("Dilation, Toffoli-opt",       "#d62728", "^"),
+    "dil_qopt": ("Dilation, qubit-opt",         "#9467bd", "D"),
+    "ref_topt": ("Reflection isometry, Toffoli-opt", "#ff7f0e", "P"),
+    "ref_qopt": ("Reflection isometry, qubit-opt",   "#8c564b", "X"),
 }
 
 
@@ -309,15 +368,20 @@ def table_page():
     ax.axis("off")
     cols = ["n", "dim",
             "SVD T-opt T", "SVD T-opt Q", "SVD Q-opt T", "SVD Q-opt Q",
-            "Dil T-opt T", "Dil T-opt Q", "Dil Q-opt T", "Dil Q-opt Q"]
+            "Dil T-opt T", "Dil T-opt Q", "Dil Q-opt T", "Dil Q-opt Q",
+            "Refl T-opt T", "Refl T-opt Q", "Refl Q-opt T", "Refl Q-opt Q",
+            "alpha_refl"]
     rows = []
     for i, n in enumerate(N_VALUES):
         st, sq = svd_topt[i], svd_qopt[i]
         dt, dq = dil_topt[i], dil_qopt[i]
+        rt, rq = ref_topt[i], ref_qopt[i]
         rows.append([
             n, 1 << n,
             f"{st.toffoli:,}", st.qubits, f"{sq.toffoli:,}", sq.qubits,
             f"{dt.toffoli:,}", dt.qubits, f"{dq.toffoli:,}", dq.qubits,
+            f"{rt.toffoli:,}", rt.qubits, f"{rq.toffoli:,}", rq.qubits,
+            1 << n,
         ])
     tbl = ax.table(cellText=rows, colLabels=cols, loc="center", cellLoc="center")
     tbl.auto_set_font_size(False)
@@ -354,6 +418,13 @@ def summary_page():
         "  Each A_k is completed (Stinespring) to a unitary W_k of size 2^(n+1) x 2^(n+1).",
         "  Synthesize sum_k |k><k| (x) W_k via one interferometer on (n+1) system qubits:",
         "    BlockUnitaryInterferometerSynthesisQROAM(n_blocks=K, n_rows=2^(n+1), n_layers=2^(n+1)).",
+        "  Subnormalization alpha = 1.",
+        "",
+        "Approach 3 (reflection rectangular):",
+        "  B = (H_A (x) I) . SWAP_{A,col} . O_A . (H_A (x) I) where",
+        "    O_A = QROAMClean((K, N, N), b) + ctrl-AddIntoPhaseGrad + QROAMCleanAdjoint",
+        "  loads the entry-rotation angle.  Subnormalization alpha = N = 2^n: the",
+        "  raw Toffoli is small but algorithms (QSVT, QPE) need an extra factor N.",
         "",
         "All resource counts come from Qualtran's get_cost_value(QECGatesCost()), via",
         "  utils.get_Toffoli_counts and utils.get_qubit_counts.  Each cost is optimized over",

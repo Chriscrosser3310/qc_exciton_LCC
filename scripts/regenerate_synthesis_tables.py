@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Regenerate the synthesis intercept and workspace tables from the Bloq.
 
-The closed-form Toffoli decomposition for ``BlockUnitarySynthesisQROAM`` is
+The closed-form Toffoli decomposition for ``BlockUnitaryReflectionQROAM`` is
 
     T(n_blocks, N, K, b) = K * (2 * (log2(N) + 1) * b + I_1(n_blocks, N))
 
@@ -24,7 +24,7 @@ dicts against the freshly extracted values; pass ``--print`` to emit
 Python source ready to paste back into ``model_resource_counts.py``.
 
 Both tables match the ones already shipped with the module (verified by
-``tests/test_block_unitary_synthesis_b_intercept.py::test_reference_table_matches_module_table``
+``tests/test_block_unitary_reflection_b_intercept.py::test_reference_table_matches_module_table``
 and the cycle-11 round-trip test for workspaces); this script just
 captures the procedure in one runnable place.
 """
@@ -42,8 +42,8 @@ sys.path.insert(0, os.path.join(REPO_ROOT, "src"))
 
 from qualtran.resource_counting import QECGatesCost, QubitCount, get_cost_value
 
-from integrations.qualtran.block_unitary_synthesis_QROAM import (
-    BlockUnitarySynthesisQROAM,
+from integrations.qualtran.block_unitary_reflection_QROAM import (
+    BlockUnitaryReflectionQROAM,
 )
 from integrations.qualtran.model_resource_counts import (
     SYNTHESIS_PER_REFLECTION_INTERCEPT,
@@ -56,11 +56,12 @@ N_ROWS_GRID: tuple[int, ...] = (4, 8, 16, 32, 64, 128, 256)
 BITSIZE_GRID: tuple[int, ...] = (2, 4, 8, 16, 32)
 B_REF_FOR_INTERCEPT = 4
 SUMMARY_N_ROWS = 256
+SUMMARY_N_BLOCKS = 64
 SUMMARY_BITSIZE = 32
 
 
-def _build(n_blocks: int, n_rows: int, bitsize: int) -> BlockUnitarySynthesisQROAM:
-    return BlockUnitarySynthesisQROAM.from_shape(
+def _build(n_blocks: int, n_rows: int, bitsize: int) -> BlockUnitaryReflectionQROAM:
+    return BlockUnitaryReflectionQROAM.from_shape(
         n_blocks=n_blocks, n_rows=n_rows, phase_bitsize=bitsize, n_reflections=1
     )
 
@@ -69,7 +70,7 @@ def extract_intercept(n_blocks: int, n_rows: int) -> int:
     """Per-reflection ``b=0`` intercept ``I_1(n_blocks, n_rows)``.
 
     Slope is ``2*(log2(N)+1)`` by the K-linearity / b-affineness identities
-    pinned in ``tests/test_block_unitary_synthesis_scaling.py``. Subtract
+    pinned in ``tests/test_block_unitary_reflection_scaling.py``. Subtract
     the slope contribution at ``b = B_REF_FOR_INTERCEPT`` to recover the
     intercept.
     """
@@ -194,17 +195,24 @@ def _format_scaling_summary(
     workspace: dict[tuple[int, int, int], int] | None,
     *,
     n_rows: int = SUMMARY_N_ROWS,
+    n_blocks: int = SUMMARY_N_BLOCKS,
     bitsize: int = SUMMARY_BITSIZE,
     n_blocks_grid: Sequence[int] = N_BLOCKS_GRID,
+    n_rows_grid: Sequence[int] = N_ROWS_GRID,
 ) -> str:
     """Summarize canonical-slice power-law fits for closed-form work."""
 
-    n_blocks = [nb for nb in n_blocks_grid if (nb, n_rows) in intercept]
-    intercept_values = [intercept[(nb, n_rows)] for nb in n_blocks]
-    alpha_i, coeff_i = _power_law_fit(n_blocks, intercept_values)
+    block_slice = [nb for nb in n_blocks_grid if (nb, n_rows) in intercept]
+    block_intercepts = [intercept[(nb, n_rows)] for nb in block_slice]
+    alpha_i, coeff_i = _power_law_fit(block_slice, block_intercepts)
+
+    row_slice = [nr for nr in n_rows_grid if (n_blocks, nr) in intercept]
+    row_intercepts = [intercept[(n_blocks, nr)] for nr in row_slice]
+    alpha_i_n, coeff_i_n = _power_law_fit(row_slice, row_intercepts)
     lines = [
         "Scaling summary for canonical report slice:",
         f"  I_1(n_blocks, N={n_rows}) ≈ {coeff_i:.6g} * n_blocks^{alpha_i:.6f}",
+        f"  I_1(n_blocks={n_blocks}, N) ≈ {coeff_i_n:.6g} * N^{alpha_i_n:.6f}",
     ]
     if workspace is not None:
         workspace_blocks = [
@@ -217,6 +225,17 @@ def _format_scaling_summary(
         lines.append(
             f"  W(n_blocks, N={n_rows}, b={bitsize}) ≈ "
             f"{coeff_w:.6g} * n_blocks^{alpha_w:.6f}"
+        )
+        workspace_rows = [
+            nr for nr in n_rows_grid if (n_blocks, nr, bitsize) in workspace
+        ]
+        row_workspace_values = [
+            workspace[(n_blocks, nr, bitsize)] for nr in workspace_rows
+        ]
+        alpha_w_n, coeff_w_n = _power_law_fit(workspace_rows, row_workspace_values)
+        lines.append(
+            f"  W(n_blocks={n_blocks}, N, b={bitsize}) ≈ "
+            f"{coeff_w_n:.6g} * N^{alpha_w_n:.6f}"
         )
     return "\n".join(lines)
 

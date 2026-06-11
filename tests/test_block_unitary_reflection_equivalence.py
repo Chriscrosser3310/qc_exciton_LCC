@@ -1,8 +1,8 @@
-"""Equivalence tests for ``BlockUnitarySynthesisQROAM``.
+"""Equivalence tests for ``BlockUnitaryReflectionQROAM``.
 
 These tests pin down the single-block reduction
-``BlockUnitarySynthesisQROAM(n_blocks=1)`` against the un-blocked
-``UnitarySynthesisQROAM`` on Toffoli/AND/measurement counts, and check
+``BlockUnitaryReflectionQROAM(n_blocks=1)`` against the un-blocked
+``UnitaryReflectionQROAM`` on Toffoli/AND/measurement counts, and check
 basic structural invariants of the block-indexed variant (signature
 shape, isometry support, symbolic ``from_shape``, adjoint toggling,
 and data-free decomposition errors).
@@ -53,11 +53,11 @@ _ = qualtran
 from qualtran import DecomposeTypeError
 from qualtran.resource_counting import QECGatesCost, get_cost_value
 
-from integrations.qualtran.block_unitary_synthesis_QROAM import (
+from integrations.qualtran.block_unitary_reflection_QROAM import (
     BlockPrepareHouseholderStateQROAM,
-    BlockUnitarySynthesisQROAM,
+    BlockUnitaryReflectionQROAM,
 )
-from integrations.qualtran.unitary_synthesis_QROAM import UnitarySynthesisQROAM
+from integrations.qualtran.unitary_reflection_QROAM import UnitaryReflectionQROAM
 
 
 def _random_unitary(n: int, seed: int) -> np.ndarray:
@@ -73,34 +73,41 @@ def _gate_costs(bloq):
     return get_cost_value(bloq, QECGatesCost())
 
 
-def test_single_block_toffoli_matches_flat_n2():
+def test_single_block_toffoli_le_flat_n2():
+    """Block (n_blocks=1) must cost no more than the flat construction; the per-layer
+    cap inside the staircase may yield strict savings, but never an increase."""
     U = _random_unitary(2, seed=0)
-    block = BlockUnitarySynthesisQROAM(block_unitaries=U[None], phase_bitsize=4)
-    flat = UnitarySynthesisQROAM(unitary=U, phase_bitsize=4)
-    assert _gate_costs(block).toffoli == _gate_costs(flat).toffoli
+    block = BlockUnitaryReflectionQROAM(block_unitaries=U[None], phase_bitsize=4)
+    flat = UnitaryReflectionQROAM(unitary=U, phase_bitsize=4)
+    assert _gate_costs(block).toffoli <= _gate_costs(flat).toffoli
 
 
-def test_single_block_toffoli_matches_flat_n4():
+def test_single_block_toffoli_le_flat_n4():
     U = _random_unitary(4, seed=1)
-    block = BlockUnitarySynthesisQROAM(block_unitaries=U[None], phase_bitsize=6)
-    flat = UnitarySynthesisQROAM(unitary=U, phase_bitsize=6)
-    assert _gate_costs(block).toffoli == _gate_costs(flat).toffoli
+    block = BlockUnitaryReflectionQROAM(
+        block_unitaries=U[None], phase_bitsize=6,
+        amp_log_block_sizes=None, amp_adjoint_log_block_sizes=None,
+        phase_log_block_sizes=None, phase_adjoint_log_block_sizes=None,
+    )
+    flat = UnitaryReflectionQROAM(unitary=U, phase_bitsize=6)
+    assert _gate_costs(block).toffoli <= _gate_costs(flat).toffoli
 
 
-def test_single_block_toffoli_matches_flat_n8():
+def test_single_block_toffoli_le_flat_n8():
     U = _random_unitary(8, seed=2)
-    block = BlockUnitarySynthesisQROAM(block_unitaries=U[None], phase_bitsize=6)
-    flat = UnitarySynthesisQROAM(unitary=U, phase_bitsize=6)
-    # Toffoli is the headline cost. The block variant may use a slightly
-    # different QROAM block-size optimum (its data tensor is 2D rather
-    # than 1D), so and_bloq/measurement counts can diverge by O(1).
-    assert _gate_costs(block).toffoli == _gate_costs(flat).toffoli
+    block = BlockUnitaryReflectionQROAM(
+        block_unitaries=U[None], phase_bitsize=6,
+        amp_log_block_sizes=None, amp_adjoint_log_block_sizes=None,
+        phase_log_block_sizes=None, phase_adjoint_log_block_sizes=None,
+    )
+    flat = UnitaryReflectionQROAM(unitary=U, phase_bitsize=6)
+    assert _gate_costs(block).toffoli <= _gate_costs(flat).toffoli
 
 
 def test_single_block_signature_has_no_block_register():
     """n_blocks=1 ⇒ block_bitsize=0 ⇒ no 'block' register slot."""
     U = _random_unitary(4, seed=3)
-    block = BlockUnitarySynthesisQROAM(block_unitaries=U[None], phase_bitsize=4)
+    block = BlockUnitaryReflectionQROAM(block_unitaries=U[None], phase_bitsize=4)
     names = [r.name for r in block.signature]
     assert "block" not in names
     assert names == ["reflection_ancilla", "system", "phase_gradient"]
@@ -109,7 +116,7 @@ def test_single_block_signature_has_no_block_register():
 def test_multi_block_signature_includes_block_register():
     rng = np.random.default_rng(4)
     blocks = np.stack([_random_unitary(4, seed=10 + i) for i in range(3)])
-    block = BlockUnitarySynthesisQROAM(block_unitaries=blocks, phase_bitsize=4)
+    block = BlockUnitaryReflectionQROAM(block_unitaries=blocks, phase_bitsize=4)
     names = [r.name for r in block.signature]
     assert names[0] == "block"
     # ceil_log2(3) == 2
@@ -122,7 +129,7 @@ def test_isometry_n_reflections_equals_n_cols():
     U = _random_unitary(4, seed=5)
     # Keep only the first two orthonormal columns of each block.
     iso = U[:, :2][None]  # (1, 4, 2)
-    block = BlockUnitarySynthesisQROAM(block_unitaries=iso, phase_bitsize=4)
+    block = BlockUnitaryReflectionQROAM(block_unitaries=iso, phase_bitsize=4)
     assert block.n_reflections == 2
 
     # Call graph must contain exactly 2 reflection bloqs.
@@ -134,7 +141,7 @@ def test_isometry_n_reflections_equals_n_cols():
 
 
 def test_data_free_bloq_cannot_decompose():
-    bloq = BlockUnitarySynthesisQROAM.from_shape(
+    bloq = BlockUnitaryReflectionQROAM.from_shape(
         n_blocks=4, n_rows=8, phase_bitsize=6
     )
     with pytest.raises(DecomposeTypeError):
@@ -142,7 +149,7 @@ def test_data_free_bloq_cannot_decompose():
 
 
 def test_from_shape_isometry_keeps_n_reflections():
-    bloq = BlockUnitarySynthesisQROAM.from_shape(
+    bloq = BlockUnitaryReflectionQROAM.from_shape(
         n_blocks=2, n_rows=8, phase_bitsize=6, n_reflections=3
     )
     assert bloq.n_blocks == 2
@@ -155,7 +162,7 @@ def test_from_shape_isometry_keeps_n_reflections():
 def test_from_shape_symbolic():
     sympy = pytest.importorskip("sympy")
     nb, nr, pb = sympy.symbols("Nb N b", positive=True, integer=True)
-    bloq = BlockUnitarySynthesisQROAM.from_shape(
+    bloq = BlockUnitaryReflectionQROAM.from_shape(
         n_blocks=nb, n_rows=nr, phase_bitsize=pb
     )
     assert bloq.n_blocks == nb
@@ -166,7 +173,7 @@ def test_from_shape_symbolic():
 def test_rejects_non_orthonormal_block():
     bad = np.array([[[1.0 + 0j, 1.0 + 0j], [0.0, 1.0 + 0j]]], dtype=np.complex128)
     with pytest.raises(AssertionError):
-        BlockUnitarySynthesisQROAM(block_unitaries=bad, phase_bitsize=4)
+        BlockUnitaryReflectionQROAM(block_unitaries=bad, phase_bitsize=4)
 
 
 def test_prepare_householder_adjoint_toggles_uncompute():
@@ -182,7 +189,7 @@ def test_prepare_householder_adjoint_toggles_uncompute():
 
 def test_reflection_indexed_by_basis():
     U = _random_unitary(4, seed=8)
-    block = BlockUnitarySynthesisQROAM(block_unitaries=U[None], phase_bitsize=4)
+    block = BlockUnitaryReflectionQROAM(block_unitaries=U[None], phase_bitsize=4)
     for k in range(block.n_reflections):
         r = block.reflection(k)
         assert r.basis_index == k

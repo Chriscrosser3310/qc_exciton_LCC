@@ -16,10 +16,11 @@ from typing import Dict, Iterable, Optional, Tuple, TYPE_CHECKING, Union
 import attrs
 import numpy as np
 
-from qualtran import Bloq, BloqBuilder, GateWithRegisters, QUInt, Signature, SoquetT
+from qualtran import Bloq, BloqBuilder, CtrlSpec, GateWithRegisters, QBit, QUInt, Register, Signature, SoquetT
 from qualtran.bloqs.arithmetic.addition import AddK
-from qualtran.bloqs.basic_gates import Hadamard, Toffoli
+from qualtran.bloqs.basic_gates import Discard, Hadamard, MeasureX, Toffoli
 from qualtran.bloqs.data_loading.qroam_clean import QROAMClean, QROAMCleanAdjoint
+from qualtran.bloqs.mcmt.specialized_ctrl import get_ctrl_system_1bit_cv_from_bloqs
 from qualtran.bloqs.rotations.phase_gradient import AddIntoPhaseGrad
 from qualtran.symbolics import bit_length, is_symbolic, Shaped, SymbolicInt
 
@@ -29,11 +30,27 @@ except ImportError:
     from state_prep_QROAM import _cap_log_block_sizes, _to_tuple_or_none
 
 if TYPE_CHECKING:
+    from qualtran import AddControlledT
     from qualtran.resource_counting import BloqCountDictT, SympySymbolAllocator
 
 
 def _positive_power_of_two(n: SymbolicInt) -> bool:
     return isinstance(n, int) and n > 0 and n == 2 ** bit_length(n - 1)
+
+
+def _measure_x_reset(bb: BloqBuilder, soq) -> None:
+    """Erase a loaded QROAM register by X-basis measurement.
+
+    The sign correction normally applied by ``QROAMCleanAdjoint`` is intentionally
+    omitted here: in the interferometer construction it is absorbed into the next
+    QROAM phase lookup.  Qualtran's ``MeasureX`` consumes the measured qubit; the
+    classical outcome is discarded because no local correction is applied.
+    """
+    arr = np.atleast_1d(np.asarray(soq))
+    for s in arr.ravel():
+        for q in bb.split(s):
+            c = bb.add(MeasureX(), q=q)
+            bb.add(Discard(), c=c)
 
 
 def _data_max_log_block_sizes(data_shape: Tuple[SymbolicInt, ...]) -> Tuple[SymbolicInt, ...]:
@@ -50,6 +67,35 @@ def _data_max_log_block_sizes(data_shape: Tuple[SymbolicInt, ...]) -> Tuple[Symb
         else:
             result.append(int(log2(max(1, int(d)))))
     return tuple(result)
+
+
+def _qroam_log_block_sizes(
+    log_block_sizes: Optional[Tuple[SymbolicInt, ...]],
+    data_shape: Tuple[SymbolicInt, ...],
+) -> Optional[Tuple[SymbolicInt, ...]]:
+    """Return dimensionally valid QROAM log block sizes for ``data_shape``.
+
+    Length mismatches are rejected because silently zipping them would drop a
+    selection dimension and severely undercount the QROAM table cost.
+    """
+    if log_block_sizes is None:
+        return None
+    max_log_block_sizes = _data_max_log_block_sizes(data_shape)
+    # When n_blocks == 1 the data shape drops its leading block axis. A caller-supplied
+    # (block, row) pair then has one extra entry; drop the leading block-split iff it is 0
+    # (a 0 block-split is a no-op, so this cannot undercount the table cost).
+    if (
+        len(log_block_sizes) == len(max_log_block_sizes) + 1
+        and not is_symbolic(log_block_sizes[0])
+        and int(log_block_sizes[0]) == 0
+    ):
+        log_block_sizes = log_block_sizes[1:]
+    if len(log_block_sizes) != len(max_log_block_sizes):
+        raise ValueError(
+            "log_block_sizes must have one entry per QROAM data dimension: "
+            f"got {log_block_sizes} for data_shape={data_shape}"
+        )
+    return _cap_log_block_sizes(log_block_sizes, max_log_block_sizes)
 
 
 @attrs.frozen
@@ -113,7 +159,7 @@ class BlockInterferometerPhaseLayerQROAM(GateWithRegisters):
 
     @property
     def qroam_log_block_sizes(self) -> Optional[Tuple[SymbolicInt, ...]]:
-        return _cap_log_block_sizes(self.log_block_sizes, _data_max_log_block_sizes(self.qroam_data_shape))
+        return _qroam_log_block_sizes(self.log_block_sizes, self.qroam_data_shape)
 
     @property
     def qroam_bloq_for_cost(self) -> QROAMClean:
@@ -125,7 +171,7 @@ class BlockInterferometerPhaseLayerQROAM(GateWithRegisters):
         )
 
     def build_composite_bloq(self, bb: BloqBuilder, **soqs: SoquetT) -> Dict[str, SoquetT]:
-        r"""Circuit: QROAM(block, j) → α,β; H s; ctrl-s β→grad; H s; ctrl-s α→grad; QROAM†.
+        r"""Circuit: QROAM(block, j) → α,β; H s; ctrl-s β→grad; H s; ctrl-s α→grad; erase α,β.
 
         The system register encodes y = 2j + s.  s (LSB) is the mode bit acted on by each
         beamsplitter; j (upper bits) is the pair index used to address the angle table.
@@ -162,40 +208,56 @@ class BlockInterferometerPhaseLayerQROAM(GateWithRegisters):
         s = bb.add(Hadamard(), q=s)
         s, alpha, phase_grad = bb.add(ctrl_add, ctrl=s, x=alpha, phase_grad=phase_grad)
 
-        # Measurement-based uncompute (0 Toffoli, per arXiv:2409.11748 eq 84)
-        qroam_adj = QROAMCleanAdjoint.build_from_bitsize(
-            qroam.data_shape,
-            target_bitsizes=qroam.target_bitsizes,
-            target_shapes=(qroam.block_sizes,) * len(qroam.target_bitsizes),
-        )
-        block_sizes = qroam.block_sizes
-        targets_map = {'target0_': alpha, 'target1_': beta}
-        adj_sel_names = [r.name for r in qroam_adj.selection_registers]
-        adj_soqs: Dict[str, SoquetT] = {}
-        if has_block:
-            adj_soqs[adj_sel_names[0]] = block
-            adj_soqs[adj_sel_names[1]] = pair
-        else:
-            adj_soqs[adj_sel_names[0]] = pair
-        for target, adj_target in zip(qroam.target_registers, qroam_adj.target_registers):
+        # Measurement-reset the QROAM load without the QROAMCleanAdjoint sign-fixup
+        # lookup.  That sign is absorbed into the following layer's QROAM phases.
+        for target, target_soq in zip(qroam.target_registers, (alpha, beta)):
+            _measure_x_reset(bb, target_soq)
             junk_name = 'junk_' + target.name
-            junk_arr = np.asarray(qroam_out[junk_name]) if junk_name in qroam_out else np.array([])
-            adj_soqs[adj_target.name] = np.array([targets_map[target.name], *junk_arr]).reshape(block_sizes)
-        adj_out = bb.add_d(qroam_adj, **adj_soqs)
+            if junk_name in qroam_out:
+                _measure_x_reset(bb, qroam_out[junk_name])
 
         # Rejoin system: [pair_MSB ... pair_0, s]
-        pair_out = adj_out[adj_sel_names[1]] if has_block else adj_out[adj_sel_names[0]]
-        system_out = bb.join(np.concatenate([bb.split(pair_out), [s]]), dtype=QUInt(self.system_bitsize))
+        system_out = bb.join(np.concatenate([bb.split(pair), [s]]), dtype=QUInt(self.system_bitsize))
 
         out: Dict[str, SoquetT] = {'system': system_out, 'phase_gradient': phase_grad}
         if has_block:
-            out['block'] = adj_out[adj_sel_names[0]]
+            out['block'] = block
         return out
 
     def build_call_graph(self, ssa: "SympySymbolAllocator") -> "BloqCountDictT":
         ret: "Counter[Bloq]" = Counter()
         ret[self.qroam_bloq_for_cost] += 1
         ret[AddIntoPhaseGrad(self.phase_bitsize, self.phase_bitsize).controlled()] += 2
+        ret[Hadamard()] += 2
+        return ret
+
+    def get_ctrl_system(self, ctrl_spec: "CtrlSpec") -> "Tuple[Bloq, AddControlledT]":
+        return get_ctrl_system_1bit_cv_from_bloqs(
+            self, ctrl_spec, current_ctrl_bit=None,
+            bloq_with_ctrl=_ControlledPhaseLayerQROAM(self), ctrl_reg_name='ctrl',
+        )
+
+
+@attrs.frozen
+class _ControlledPhaseLayerQROAM(GateWithRegisters):
+    """Singly-controlled BlockInterferometerPhaseLayerQROAM.
+
+    Only the two ctrl-AddIntoPhaseGrad become doubly-controlled; the QROAM load,
+    measurement-based uncompute, and Hadamards stay uncontrolled because they
+    self-cancel (or are identity) when the external control is 0.
+    """
+
+    inner: "BlockInterferometerPhaseLayerQROAM"
+
+    @property
+    def signature(self) -> Signature:
+        return Signature([Register('ctrl', QBit()), *self.inner.signature])
+
+    def build_call_graph(self, ssa: "SympySymbolAllocator") -> "BloqCountDictT":
+        b = self.inner.phase_bitsize
+        ret: "Counter[Bloq]" = Counter()
+        ret[self.inner.qroam_bloq_for_cost] += 1
+        ret[AddIntoPhaseGrad(b, b).controlled().controlled()] += 2  # cc-add
         ret[Hadamard()] += 2
         return ret
 
@@ -244,11 +306,11 @@ class BlockInterferometerFinalPhasesQROAM(GateWithRegisters):
 
     @property
     def qroam_log_block_sizes(self) -> Optional[Tuple[SymbolicInt, ...]]:
-        return _cap_log_block_sizes(self.log_block_sizes, _data_max_log_block_sizes(self.qroam_data_shape))
+        return _qroam_log_block_sizes(self.log_block_sizes, self.qroam_data_shape)
 
     @property
     def qroam_adjoint_log_block_sizes(self) -> Optional[Tuple[SymbolicInt, ...]]:
-        return _cap_log_block_sizes(self.adjoint_log_block_sizes, _data_max_log_block_sizes(self.qroam_data_shape))
+        return _qroam_log_block_sizes(self.adjoint_log_block_sizes, self.qroam_data_shape)
 
     @property
     def qroam_bloq_for_cost(self) -> QROAMClean:
@@ -327,6 +389,35 @@ class BlockInterferometerFinalPhasesQROAM(GateWithRegisters):
         ret[self.qroam_adj_bloq_for_cost] += 1
         return ret
 
+    def get_ctrl_system(self, ctrl_spec: "CtrlSpec") -> "Tuple[Bloq, AddControlledT]":
+        return get_ctrl_system_1bit_cv_from_bloqs(
+            self, ctrl_spec, current_ctrl_bit=None,
+            bloq_with_ctrl=_ControlledFinalPhasesQROAM(self), ctrl_reg_name='ctrl',
+        )
+
+
+@attrs.frozen
+class _ControlledFinalPhasesQROAM(GateWithRegisters):
+    """Singly-controlled BlockInterferometerFinalPhasesQROAM.
+
+    Promotes the bare AddIntoPhaseGrad to singly-controlled; QROAM load and
+    QROAMCleanAdjoint stay uncontrolled.
+    """
+
+    inner: "BlockInterferometerFinalPhasesQROAM"
+
+    @property
+    def signature(self) -> Signature:
+        return Signature([Register('ctrl', QBit()), *self.inner.signature])
+
+    def build_call_graph(self, ssa: "SympySymbolAllocator") -> "BloqCountDictT":
+        b = self.inner.phase_bitsize
+        ret: "Counter[Bloq]" = Counter()
+        ret[self.inner.qroam_bloq_for_cost] += 1
+        ret[AddIntoPhaseGrad(b, b).controlled()] += 1
+        ret[self.inner.qroam_adj_bloq_for_cost] += 1
+        return ret
+
 
 @attrs.frozen
 class TargetOnlyCyclicShiftCost(Bloq):
@@ -363,14 +454,30 @@ class BlockUnitaryInterferometerSynthesisQROAM(GateWithRegisters):
     include_final_phases: bool = True
     include_shift_cost: bool = True
     log_block_sizes: Optional[Tuple[SymbolicInt, ...]] = attrs.field(
-        default=None, converter=_to_tuple_or_none
+        default=(0, 0), converter=_to_tuple_or_none
     )
     final_log_block_sizes: Optional[Tuple[SymbolicInt, ...]] = attrs.field(
-        default=None, converter=_to_tuple_or_none
+        default=(0, 0), converter=_to_tuple_or_none
     )
     final_adjoint_log_block_sizes: Optional[Tuple[SymbolicInt, ...]] = attrs.field(
-        default=None, converter=_to_tuple_or_none
+        default=(0, 0), converter=_to_tuple_or_none
     )
+    optimal_T: bool = False
+
+    def __attrs_post_init__(self):
+        if self.optimal_T:
+            if is_symbolic(self.n_blocks, self.n_rows, self.phase_bitsize):
+                raise ValueError("optimal_T=True requires concrete n_blocks, n_rows, phase_bitsize")
+            opt = optimal_interferometer_log_block_sizes(
+                int(self.n_blocks), int(self.n_rows), int(self.phase_bitsize)
+            )
+            # When n_blocks == 1 the QROAM data shapes drop the block axis (1-D), so the
+            # stored log_block_sizes must be 1-D too (the block split is 0 anyway).
+            if int(self.n_blocks) == 1:
+                opt = (opt[-1],)
+            object.__setattr__(self, 'log_block_sizes', opt)
+            object.__setattr__(self, 'final_log_block_sizes', opt)
+            object.__setattr__(self, 'final_adjoint_log_block_sizes', opt)
 
     @classmethod
     def from_shape(
@@ -380,9 +487,10 @@ class BlockUnitaryInterferometerSynthesisQROAM(GateWithRegisters):
         phase_bitsize: SymbolicInt,
         *,
         n_layers: Optional[SymbolicInt] = None,
-        log_block_sizes: Optional[Union[SymbolicInt, Iterable[SymbolicInt]]] = None,
-        final_log_block_sizes: Optional[Union[SymbolicInt, Iterable[SymbolicInt]]] = None,
-        final_adjoint_log_block_sizes: Optional[Union[SymbolicInt, Iterable[SymbolicInt]]] = None,
+        log_block_sizes: Optional[Union[SymbolicInt, Iterable[SymbolicInt]]] = (0, 0),
+        final_log_block_sizes: Optional[Union[SymbolicInt, Iterable[SymbolicInt]]] = (0, 0),
+        final_adjoint_log_block_sizes: Optional[Union[SymbolicInt, Iterable[SymbolicInt]]] = (0, 0),
+        optimal_T: bool = False,
     ) -> "BlockUnitaryInterferometerSynthesisQROAM":
         return cls(
             n_blocks=n_blocks,
@@ -392,6 +500,7 @@ class BlockUnitaryInterferometerSynthesisQROAM(GateWithRegisters):
             log_block_sizes=log_block_sizes,
             final_log_block_sizes=final_log_block_sizes,
             final_adjoint_log_block_sizes=final_adjoint_log_block_sizes,
+            optimal_T=optimal_T,
         )
 
     @property
@@ -415,12 +524,24 @@ class BlockUnitaryInterferometerSynthesisQROAM(GateWithRegisters):
         )
 
     @property
+    def effective_log_block_sizes(self) -> Optional[Tuple[SymbolicInt, ...]]:
+        return self.log_block_sizes
+
+    @property
+    def effective_final_log_block_sizes(self) -> Optional[Tuple[SymbolicInt, ...]]:
+        return self.final_log_block_sizes
+
+    @property
+    def effective_final_adjoint_log_block_sizes(self) -> Optional[Tuple[SymbolicInt, ...]]:
+        return self.final_adjoint_log_block_sizes
+
+    @property
     def phase_layer(self) -> BlockInterferometerPhaseLayerQROAM:
         return BlockInterferometerPhaseLayerQROAM(
             n_blocks=self.n_blocks,
             n_rows=self.n_rows,
             phase_bitsize=self.phase_bitsize,
-            log_block_sizes=self.log_block_sizes,
+            log_block_sizes=self.effective_log_block_sizes,
         )
 
     @property
@@ -429,8 +550,8 @@ class BlockUnitaryInterferometerSynthesisQROAM(GateWithRegisters):
             n_blocks=self.n_blocks,
             n_rows=self.n_rows,
             phase_bitsize=self.phase_bitsize,
-            log_block_sizes=self.final_log_block_sizes,
-            adjoint_log_block_sizes=self.final_adjoint_log_block_sizes,
+            log_block_sizes=self.effective_final_log_block_sizes,
+            adjoint_log_block_sizes=self.effective_final_adjoint_log_block_sizes,
         )
 
     def build_composite_bloq(self, bb: BloqBuilder, **soqs: SoquetT) -> Dict[str, SoquetT]:
@@ -495,6 +616,45 @@ class BlockUnitaryInterferometerSynthesisQROAM(GateWithRegisters):
             ret[self.final_phase_layer] += 1
         return ret
 
+    def get_ctrl_system(self, ctrl_spec: "CtrlSpec") -> "Tuple[Bloq, AddControlledT]":
+        return get_ctrl_system_1bit_cv_from_bloqs(
+            self, ctrl_spec, current_ctrl_bit=None,
+            bloq_with_ctrl=_ControlledBlockUnitaryInterferometerSynthesisQROAM(self),
+            ctrl_reg_name='ctrl',
+        )
+
+
+@attrs.frozen
+class _ControlledBlockUnitaryInterferometerSynthesisQROAM(GateWithRegisters):
+    """Singly-controlled BlockUnitaryInterferometerSynthesisQROAM.
+
+    The external ctrl propagates only to the AddIntoPhaseGrad operations inside each
+    phase layer and the final phase layer; QROAM loads, Hadamards, and the AddK +/-1
+    shifts stay uncontrolled because they cancel pairwise (or are identity) when
+    ctrl = 0.  Hence the controlled version costs essentially the same as the bare one.
+    """
+
+    inner: "BlockUnitaryInterferometerSynthesisQROAM"
+
+    @property
+    def signature(self) -> Signature:
+        return Signature([Register('ctrl', QBit()), *self.inner.signature])
+
+    def build_call_graph(self, ssa: "SympySymbolAllocator") -> "BloqCountDictT":
+        ret: "Counter[Bloq]" = Counter()
+        ret[_ControlledPhaseLayerQROAM(self.inner.phase_layer)] += self.inner.layer_count
+        if self.inner.include_shift_cost:
+            if is_symbolic(self.inner.layer_count):
+                ret[TargetOnlyCyclicShiftCost(self.inner.system_bitsize)] += 1
+            else:
+                n_odd = int(self.inner.layer_count) // 2
+                if n_odd > 0:
+                    ret[AddK(dtype=QUInt(self.inner.system_bitsize), k=1)] += n_odd
+                    ret[AddK(dtype=QUInt(self.inner.system_bitsize), k=-1)] += n_odd
+        if self.inner.include_final_phases:
+            ret[_ControlledFinalPhasesQROAM(self.inner.final_phase_layer)] += 1
+        return ret
+
 
 @dataclass(frozen=True)
 class InterferometerResourceEstimate:
@@ -522,9 +682,9 @@ def estimate_interferometer_resources(
 ) -> InterferometerResourceEstimate:
     """Return the note's Toffoli/qubit estimate for fixed QROAM parameters.
 
-    The per-layer QROAM uncompute uses measurement-based erasure (0 Toffoli),
-    per arXiv:2409.11748 eq (84).  Only the final phase layer charges for its
-    adjoint (via final_adjoint_log_block_size).
+    The per-layer QROAM uncompute uses measurement/reset erasure with the
+    sign-fixup absorbed into the next layer, so it contributes no Toffolis.
+    The final phase layer still charges for its adjoint.
     """
 
     assert n_blocks >= 1
@@ -579,10 +739,51 @@ def optimal_interferometer_log_block_sizes(
     n_rows: int,
     phase_bitsize: int,
 ) -> Tuple[int, int]:
-    """Continuous optimum rounded to nearby powers of two for layer/final QROAM."""
+    """Return one shared 2-D QROAM log-block split for all interferometer lookups.
 
-    layer_entries = n_blocks * n_rows // 2
-    final_entries = n_blocks * n_rows
-    layer_lam = max(1.0, sqrt(layer_entries / (2 * phase_bitsize)))
-    final_lam = max(1.0, sqrt(2 * final_entries / (phase_bitsize + 1)))
-    return max(0, round(log2(layer_lam))), max(0, round(log2(final_lam)))
+    The total block size is taken to be the nearest power of two to
+    ``0.5 * sqrt((n_blocks * n_rows) / phase_bitsize)``.  The same resulting
+    split is assumed for ``log_block_sizes``, ``final_log_block_sizes``, and
+    ``final_adjoint_log_block_sizes``.
+    """
+    assert n_blocks >= 1
+    assert _positive_power_of_two(n_rows)
+    assert phase_bitsize > 0
+    lam = max(1.0, 0.5 * sqrt((n_blocks * n_rows) / phase_bitsize))
+    lam = 2 ** max(0, round(log2(lam)))
+    return split_interferometer_log_block_sizes(lam, n_blocks, n_rows)
+
+
+def split_interferometer_log_block_sizes(
+    lam: float,
+    n_blocks: int,
+    n_rows: int,
+) -> Tuple[int, int]:
+    """Split total QROAM block size ``lam`` across ``(block, pair)`` dimensions.
+
+    Returns ``(log_block_size_for_blocks, log_block_size_for_pairs)`` for the
+    phase-layer table shape ``(n_blocks, n_rows // 2)``.  The selected powers of
+    two have product as close as possible to ``lam`` while minimizing the batched
+    QROM table size ``ceil(n_blocks / k_block) * ceil((n_rows / 2) / k_pair)``.
+    """
+    assert lam >= 1
+    assert n_blocks >= 1
+    assert _positive_power_of_two(n_rows)
+    pair_rows = n_rows // 2
+    best: Optional[Tuple[float, int, int, int, int]] = None
+    for log_k_block in range(bit_length(n_blocks - 1) + 1):
+        k_block = 2**log_k_block
+        if k_block > n_blocks:
+            continue
+        for log_k_pair in range(bit_length(pair_rows - 1) + 1):
+            k_pair = 2**log_k_pair
+            if k_pair > pair_rows:
+                continue
+            product_gap = abs(k_block * k_pair - lam)
+            batched_size = ceil(n_blocks / k_block) * ceil(pair_rows / k_pair)
+            balance_gap = abs(log_k_block - log_k_pair)
+            candidate = (product_gap, batched_size, balance_gap, log_k_block, log_k_pair)
+            if best is None or candidate < best:
+                best = candidate
+    assert best is not None
+    return best[3], best[4]

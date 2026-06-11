@@ -1,4 +1,4 @@
-"""Per-reflection ``b=0`` intercept table for ``BlockUnitarySynthesisQROAM``.
+"""Per-reflection ``b=0`` intercept table for ``BlockUnitaryReflectionQROAM``.
 
 Cycles 1-4 pinned three structural identities of the synthesis bloq's
 Toffoli cost: K-linearity, b-affineness, and a per-reflection b-slope of
@@ -26,10 +26,10 @@ This file:
   (``n_blocks >= 2``) the intercept is strictly positive — a sanity
   check that the QROAM contribution dominates the per-reflection
   overhead, which is the assumption under which the
-  ``test_block_unitary_synthesis_amortization`` claims are meaningful.
+  ``test_block_unitary_reflection_amortization`` claims are meaningful.
 
 This complements the existing
-``tests/test_block_unitary_synthesis_*`` files and forms the final
+``tests/test_block_unitary_reflection_*`` files and forms the final
 Bloq-side anchor for a future ``synthesis_count`` analytic estimator.
 """
 
@@ -72,8 +72,8 @@ _ = qualtran
 
 from qualtran.resource_counting import QECGatesCost, get_cost_value
 
-from integrations.qualtran.block_unitary_synthesis_QROAM import (
-    BlockUnitarySynthesisQROAM,
+from integrations.qualtran.block_unitary_reflection_QROAM import (
+    BlockUnitaryReflectionQROAM,
 )
 from integrations.qualtran.model_resource_counts import (
     SYNTHESIS_PER_REFLECTION_INTERCEPT,
@@ -97,7 +97,7 @@ REFERENCE: dict[tuple[int, int], int] = {
 
 
 def _toffoli(n_blocks: int, N: int, b: int, K: int) -> int:
-    bloq = BlockUnitarySynthesisQROAM.from_shape(
+    bloq = BlockUnitaryReflectionQROAM.from_shape(
         n_blocks=n_blocks, n_rows=N, phase_bitsize=b, n_reflections=K
     )
     return get_cost_value(bloq, QECGatesCost()).toffoli

@@ -32,8 +32,8 @@ from integrations.qualtran.block_unitary_interferometer_QROAM import (
     optimal_interferometer_log_block_sizes,
 )
 from integrations.qualtran.model_resource_counts import optimize_block_unitary_interferometer
-from integrations.qualtran.block_unitary_synthesis_QROAM import BlockUnitarySynthesisQROAM
-from integrations.qualtran.unitary_synthesis_QROAM import UnitarySynthesisQROAM
+from integrations.qualtran.block_unitary_reflection_QROAM import BlockUnitaryReflectionQROAM
+from integrations.qualtran.unitary_reflection_QROAM import UnitaryReflectionQROAM
 from integrations.qualtran.utils import get_Toffoli_counts, get_qubit_counts
 
 K_VALUES = list(range(1, 7))
@@ -66,16 +66,19 @@ def compute_standard_resources(n_blocks: int, lbs: int) -> Optional[Record]:
     """Existing Householder/QROAM block-unitary resource estimate."""
 
     try:
-        bloq = BlockUnitarySynthesisQROAM.from_shape(
+        bloq = BlockUnitaryReflectionQROAM.from_shape(
             n_blocks=n_blocks,
             n_rows=N_ROWS,
             phase_bitsize=PHASE_BITSIZE,
             n_reflections=1,
-            log_block_sizes=[lbs, lbs],
+            amp_log_block_sizes=[lbs, lbs],
+            amp_adjoint_log_block_sizes=[lbs, lbs],
+            phase_log_block_sizes=[lbs, lbs],
+            phase_adjoint_log_block_sizes=[lbs, lbs],
         )
         t_per_reflection = int(get_Toffoli_counts(bloq))
         if n_blocks == 1:
-            fallback = UnitarySynthesisQROAM(
+            fallback = UnitaryReflectionQROAM(
                 unitary=Shaped((N_ROWS, 1)),
                 phase_bitsize=PHASE_BITSIZE,
                 log_block_sizes=[lbs],

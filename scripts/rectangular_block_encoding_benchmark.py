@@ -69,7 +69,10 @@ def evaluate(K: int, m: int, n: int, lbs_fwd: int, lbs_adj: int) -> Optional[Rec
     try:
         b = RectangularBlockEncodingReflection(
             n_blocks=K, m_rows=m, n_cols=n, phase_bitsize=PHASE_BITSIZE,
-            log_block_sizes=[lbs_fwd], adjoint_log_block_sizes=[lbs_adj],
+            amp_log_block_sizes=[lbs_fwd],
+            amp_adjoint_log_block_sizes=[lbs_adj],
+            phase_log_block_sizes=[lbs_fwd],
+            phase_adjoint_log_block_sizes=[lbs_adj],
         )
         return Rec(int(get_Toffoli_counts(b)), int(get_qubit_counts(b)), lbs_fwd, lbs_adj)
     except Exception:
@@ -177,7 +180,7 @@ def summary_page():
         "    D x D unitary using N state reflections (each in a D-dim Hilbert space).",
         "",
         "Underlying bloq:",
-        "  BlockUnitarySynthesisQROAM(n_blocks=K, n_rows=D, n_reflections=min(M, N)).",
+        "  BlockUnitaryReflectionQROAM(n_blocks=K, n_rows=D, n_reflections=min(M, N)).",
         "  Reflections are loaded by QROAM with the rows (transposed) or columns",
         "  (standard) of A_k, padded with zeros up to D.  No comparator is needed in",
         "  the circuit; the non-power-of-2 cutoff is enforced purely by the data.",

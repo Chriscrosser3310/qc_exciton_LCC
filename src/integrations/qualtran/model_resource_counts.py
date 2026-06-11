@@ -36,7 +36,7 @@ class ResourceCount:
 
 @dataclass(frozen=True)
 class SynthesisResourceCount:
-    """Analytic resource estimate for ``BlockUnitarySynthesisQROAM``.
+    """Analytic resource estimate for ``BlockUnitaryReflectionQROAM``.
 
     ``signature_qubits`` is the persistent ``block + reflection_ancilla +
     system + phase_gradient`` register width. ``workspace_qubits`` is the
@@ -98,10 +98,10 @@ def assert_power_of_two(x: int, name: str) -> None:
 
 
 # Per-reflection b=0 intercept I_1(n_blocks, N) for
-# BlockUnitarySynthesisQROAM, pinned by
-# ``tests/test_block_unitary_synthesis_b_intercept.py``. Combined with the
+# BlockUnitaryReflectionQROAM, pinned by
+# ``tests/test_block_unitary_reflection_b_intercept.py``. Combined with the
 # K-linear, b-affine, slope-= 2*(log2(N)+1) identities from
-# ``tests/test_block_unitary_synthesis_scaling.py`` it gives the closed-form
+# ``tests/test_block_unitary_reflection_scaling.py`` it gives the closed-form
 # decomposition
 #
 #     T(n_blocks, N, K, b) = K * (2 * (log2(N) + 1) * b + I_1(n_blocks, N)).
@@ -125,13 +125,13 @@ def block_unitary_synthesis_toffoli(
     bitsize: int,
     n_reflections: int,
 ) -> int:
-    r"""Return the analytic Toffoli count for ``BlockUnitarySynthesisQROAM``.
+    r"""Return the analytic Toffoli count for ``BlockUnitaryReflectionQROAM``.
 
     Implements the decomposition
 
         ``T = K * (2 * (log2(N) + 1) * b + I_1(n_blocks, N))``
 
-    pinned by the ``tests/test_block_unitary_synthesis_*`` family. The
+    pinned by the ``tests/test_block_unitary_reflection_*`` family. The
     per-reflection intercept ``I_1`` is looked up from
     ``SYNTHESIS_PER_REFLECTION_INTERCEPT``; an unknown
     ``(n_blocks, n_rows)`` raises ``KeyError`` rather than silently
@@ -151,14 +151,14 @@ def block_unitary_synthesis_toffoli(
             f"no tabulated synthesis intercept for n_blocks={n_blocks}, "
             f"n_rows={n_rows}; add an entry to "
             "SYNTHESIS_PER_REFLECTION_INTERCEPT after pinning it in "
-            "tests/test_block_unitary_synthesis_b_intercept.py"
+            "tests/test_block_unitary_reflection_b_intercept.py"
         ) from exc
     slope = 2 * (int(math.log2(n_rows)) + 1)
     return n_reflections * (slope * bitsize + intercept)
 
 
 # Transient QROAMClean workspace contribution
-# (``QubitCount(BlockUnitarySynthesisQROAM.from_shape(...)) - signature.n_qubits()``)
+# (``QubitCount(BlockUnitaryReflectionQROAM.from_shape(...)) - signature.n_qubits()``)
 # tabulated over the same 49-point ``(n_blocks, n_rows)`` grid as
 # ``SYNTHESIS_PER_REFLECTION_INTERCEPT`` plus ``bitsize`` in {2, 4, 8, 16, 32}.
 # Values were extracted at ``n_reflections=1`` and are independent of
@@ -213,7 +213,7 @@ def block_unitary_synthesis_workspace_qubits(
     n_rows: int,
     bitsize: int,
 ) -> int:
-    """Return the tabulated QROAMClean workspace qubits for ``BlockUnitarySynthesisQROAM``.
+    """Return the tabulated QROAMClean workspace qubits for ``BlockUnitaryReflectionQROAM``.
 
     Looked up from ``SYNTHESIS_WORKSPACE_QUBITS``. An untabulated
     ``(n_blocks, n_rows, bitsize)`` raises ``KeyError`` rather than
@@ -233,7 +233,7 @@ def block_unitary_synthesis_workspace_qubits(
             f"no tabulated synthesis workspace for n_blocks={n_blocks}, "
             f"n_rows={n_rows}, bitsize={bitsize}; add an entry to "
             "SYNTHESIS_WORKSPACE_QUBITS after extracting it from "
-            "QubitCount on BlockUnitarySynthesisQROAM.from_shape(...)"
+            "QubitCount on BlockUnitaryReflectionQROAM.from_shape(...)"
         ) from exc
 
 
@@ -242,7 +242,7 @@ def block_unitary_synthesis_signature_qubits(
     n_rows: int,
     bitsize: int,
 ) -> int:
-    r"""Return the persistent (signature) qubit count for ``BlockUnitarySynthesisQROAM``.
+    r"""Return the persistent (signature) qubit count for ``BlockUnitaryReflectionQROAM``.
 
     The bloq's external signature consists of four registers:
     ``block`` (``ceil_log2(n_blocks)`` qubits), ``reflection_ancilla`` (1 qubit),
@@ -570,7 +570,7 @@ def _plot_report(
             ylabel = "Synthesis peak logical qubits"
             alpha, coeff = synth_fits["synth_q"]
         ax.plot(list(synthesis_n_blocks), ys, "o-",
-                label=f"BlockUnitarySynthesisQROAM (K={synth_n_reflections})")
+                label=f"BlockUnitaryReflectionQROAM (K={synth_n_reflections})")
         x_arr = np.asarray(synthesis_n_blocks, dtype=float)
         ax.plot(
             x_arr,
@@ -624,7 +624,7 @@ def _plot_report(
         tbl.set_fontsize(8.5)
         tbl.scale(1, 1.6)
         ax.set_title(
-            f"BlockUnitarySynthesisQROAM analytic counts "
+            f"BlockUnitaryReflectionQROAM analytic counts "
             f"(N={block_dim}, b={bitsize}, K={synth_n_reflections})"
         )
         return fig
@@ -693,7 +693,7 @@ def _plot_report(
             lines.append(f"  {label}: alpha={alpha:.3f}, c={coeff:.3e}")
         lines.append("")
         lines.append(
-            f"Synthesis panel: BlockUnitarySynthesisQROAM analytic Toffoli + total qubits"
+            f"Synthesis panel: BlockUnitaryReflectionQROAM analytic Toffoli + total qubits"
         )
         lines.append(
             f"  swept over n_blocks={list(synthesis_n_blocks)}, "

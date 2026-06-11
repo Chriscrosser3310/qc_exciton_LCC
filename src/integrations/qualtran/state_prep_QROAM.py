@@ -92,7 +92,7 @@ from qualtran import (
     Soquet,
     SoquetT,
 )
-from qualtran.bloqs.basic_gates import XGate
+from qualtran.bloqs.basic_gates import Discard, MeasureX, XGate
 from qualtran.bloqs.basic_gates.rotation import Rx
 from qualtran.bloqs.data_loading.qroam_clean import QROAMClean, QROAMCleanAdjoint
 from qualtran.bloqs.rotations.phase_gradient import AddIntoPhaseGrad
@@ -100,6 +100,22 @@ from qualtran.symbolics import bit_length, HasLength, is_symbolic, Shaped, slen,
 
 if TYPE_CHECKING:
     from qualtran.resource_counting import BloqCountDictT, SympySymbolAllocator
+
+
+def _measure_x_reset(bb: BloqBuilder, soq) -> None:
+    """Erase a loaded (clean) QROAM register by X-basis measurement; 0 T / 0 Toffoli.
+
+    The phase correction that ``QROAMCleanAdjoint`` would apply is intentionally omitted:
+    in a *forward* (non-uncomputing) preparation the residual sign is absorbed into the
+    following operation (the next layer's QROAM phases, or the adjoint half of the
+    enclosing block encoding).  Mirrors ``block_unitary_interferometer_QROAM`` unitary
+    synthesis.  ``MeasureX`` consumes the qubit; the classical outcome is discarded.
+    """
+    arr = np.atleast_1d(np.asarray(soq))
+    for s in arr.ravel():
+        for q in bb.split(s):
+            c = bb.add(MeasureX(), q=q)
+            bb.add(Discard(), c=c)
 
 
 def _to_tuple_or_has_length(
@@ -178,6 +194,12 @@ class StatePreparationViaQROAMRotations(GateWithRegisters):
     adjoint_log_block_sizes: Optional[Tuple[SymbolicInt, ...]] = attrs.field(
         default=None, converter=_to_tuple_or_none
     )
+    measure_reset: bool = False
+
+    @property
+    def _layer_measure_reset(self) -> bool:
+        """Per-layer measurement-only uncompute applies only to the FORWARD direction."""
+        return self.measure_reset and not self.uncompute
 
     @classmethod
     def from_bitsize(
@@ -189,6 +211,7 @@ class StatePreparationViaQROAMRotations(GateWithRegisters):
         uncompute: bool = False,
         log_block_sizes: Optional[Union[SymbolicInt, Iterable[SymbolicInt]]] = None,
         adjoint_log_block_sizes: Optional[Union[SymbolicInt, Iterable[SymbolicInt]]] = None,
+        measure_reset: bool = False,
     ) -> 'StatePreparationViaQROAMRotations':
         """Build a dense, data-free state-preparation bloq for resource estimates.
 
@@ -205,6 +228,7 @@ class StatePreparationViaQROAMRotations(GateWithRegisters):
             uncompute=uncompute,
             log_block_sizes=log_block_sizes,
             adjoint_log_block_sizes=adjoint_log_block_sizes,
+            measure_reset=measure_reset,
         )
 
     def __attrs_post_init__(self):
@@ -263,6 +287,7 @@ class StatePreparationViaQROAMRotations(GateWithRegisters):
                         control_bitsize=self.control_bitsize + 1,
                         log_block_sizes=self.qroam_log_block_sizes,
                         adjoint_log_block_sizes=self.qroam_adjoint_log_block_sizes,
+                        measure_reset=self._layer_measure_reset,
                     )
                     for qi in range(int(self.state_bitsize))
                 ]
@@ -280,6 +305,7 @@ class StatePreparationViaQROAMRotations(GateWithRegisters):
                 control_bitsize=self.control_bitsize + 1,
                 log_block_sizes=self.qroam_log_block_sizes,
                 adjoint_log_block_sizes=self.qroam_adjoint_log_block_sizes,
+                measure_reset=self._layer_measure_reset,
             )
             ret.append(ctrl_rot_q)
         return ret
@@ -291,6 +317,10 @@ class StatePreparationViaQROAMRotations(GateWithRegisters):
             if is_symbolic(self.state_coefficients) or is_symbolic(self.phase_bitsize)
             else tuple(self.rotation_tree.get_rom_vals()[1])
         )
+        # The phase layer is the FINAL layer of a forward preparation; it always keeps the
+        # coherent QROAMCleanAdjoint (no measurement shortcut), because there is no
+        # subsequent layer to absorb the omitted sign-fixup.  Only the preceding amplitude
+        # layers use measurement-only uncompute.
         return PRGAViaPhaseGradientQROAM(
             selection_bitsize=self.state_bitsize,
             phase_bitsize=self.phase_bitsize,
@@ -298,6 +328,7 @@ class StatePreparationViaQROAMRotations(GateWithRegisters):
             control_bitsize=self.control_bitsize + 1,
             log_block_sizes=self.qroam_log_block_sizes,
             adjoint_log_block_sizes=self.qroam_adjoint_log_block_sizes,
+            measure_reset=False,
         )
 
     def build_composite_bloq(self, bb: BloqBuilder, **soqs: SoquetT) -> Dict[str, SoquetT]:
@@ -510,6 +541,7 @@ class PRGAViaPhaseGradientQROAM(Bloq):
     adjoint_log_block_sizes: Optional[Tuple[SymbolicInt, ...]] = attrs.field(
         default=None, converter=_to_tuple_or_none
     )
+    measure_reset: bool = False
 
     @property
     def qroam_log_block_sizes(self) -> Optional[Tuple[SymbolicInt, ...]]:
@@ -574,6 +606,16 @@ class PRGAViaPhaseGradientQROAM(Bloq):
         soqs["target0_"], phase_grad = bb.add(
             self.add_into_phase_grad, x=soqs["target0_"], phase_grad=phase_grad
         )
+        if self.measure_reset:
+            # Forward-only optimization: erase the loaded angle register (and junk) by
+            # X-basis measurement instead of a coherent QROAMCleanAdjoint -- 0 Toffoli.
+            for target in self.qroam_bloq.target_registers:
+                _measure_x_reset(bb, soqs.pop(target.name))
+                junk_name = 'junk_' + target.name
+                if junk_name in soqs:
+                    _measure_x_reset(bb, soqs.pop(junk_name))
+            soqs["phase_gradient"] = phase_grad
+            return soqs
         block_sizes = cast(Tuple[int, ...], self.qroam_bloq.block_sizes)
         for target, adj_target in zip(
             self.qroam_bloq.target_registers, self.qroam_adj_bloq.target_registers
@@ -593,8 +635,9 @@ class PRGAViaPhaseGradientQROAM(Bloq):
     def build_call_graph(self, ssa: 'SympySymbolAllocator') -> 'BloqCountDictT':
         ret: 'Counter[Bloq]' = Counter()
         ret[self.qroam_bloq] += 1
-        ret[self.qroam_adj_bloq] += 1
         ret[self.add_into_phase_grad] += 1
+        if not self.measure_reset:
+            ret[self.qroam_adj_bloq] += 1  # else replaced by 0-Toffoli X-measurement
         return ret
 
     def __repr__(self):

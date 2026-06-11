@@ -12,7 +12,7 @@ samples a small corner of the grid and verifies:
     and reproduces the input dict.
 
 Together with
-``tests/test_block_unitary_synthesis_b_intercept.py::test_reference_table_matches_module_table``
+``tests/test_block_unitary_reflection_b_intercept.py::test_reference_table_matches_module_table``
 (which independently re-derives the intercept table from the bloq) the
 script's extract functions are guarded against silent drift.
 """
@@ -133,8 +133,11 @@ def test_scaling_summary_reports_canonical_fits():
         SYNTHESIS_WORKSPACE_QUBITS,
     )
     assert "I_1(n_blocks, N=256)" in summary
+    assert "I_1(n_blocks=64, N)" in summary
     assert "W(n_blocks, N=256, b=32)" in summary
+    assert "W(n_blocks=64, N, b=32)" in summary
     assert "n_blocks^" in summary
+    assert "N^" in summary
 
 
 if __name__ == "__main__":

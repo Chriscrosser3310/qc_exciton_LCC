@@ -1,7 +1,12 @@
-"""Block-diagonal unitary synthesis via block-indexed QROAM state preparation."""
+"""Block-encoded unitary synthesis via QROAM-backed state-preparation reflections.
+
+This follows Sec. 4 of Low, Kliuchnikov, and Schaeffer,
+`Trading T-gates for dirty qubits in state preparation and unitary synthesis`
+(arXiv:1812.00954v2).
+"""
 
 from collections import Counter
-from typing import cast, Dict, Iterable, Optional, Tuple, TYPE_CHECKING, Union
+from typing import Dict, Iterable, Optional, Tuple, TYPE_CHECKING, Union
 
 import attrs
 import numpy as np
@@ -11,21 +16,37 @@ from numpy.typing import NDArray
 from qualtran import Bloq, BloqBuilder, DecomposeTypeError, GateWithRegisters, Signature, Soquet, SoquetT
 from qualtran.bloqs.basic_gates import CNOT, Hadamard, XGate, ZGate
 from qualtran.bloqs.mcmt import MultiControlZ
-from qualtran.symbolics import bit_length, HasLength, is_symbolic, Shaped, shape, SymbolicInt
+from qualtran.symbolics import bit_length, HasLength, is_symbolic, Shaped, slen, SymbolicInt
 
 try:
-    from .block_state_preparation_QROAM import BlockStatePreparationViaQROAMRotations
-    from .state_prep_QROAM import _to_tuple_or_none
+    from .state_prep_QROAM import StatePreparationViaQROAMRotations
 except ImportError:
-    from block_state_preparation_QROAM import BlockStatePreparationViaQROAMRotations
-    from state_prep_QROAM import _to_tuple_or_none
+    from state_prep_QROAM import StatePreparationViaQROAMRotations
 
 if TYPE_CHECKING:
     from qualtran.resource_counting import BloqCountDictT, SympySymbolAllocator
 
 
-def _to_block_unitaries_or_shape(
-    x: Union[Shaped, Iterable[Iterable[Iterable[complex]]]]
+def _to_tuple_or_none(
+    x: Optional[Union[SymbolicInt, Iterable[SymbolicInt]]],
+) -> Optional[Tuple[SymbolicInt, ...]]:
+    if x is None:
+        return None
+    if isinstance(x, (int, float, sympy.Basic)):
+        return (x,)
+    if isinstance(x, np.ndarray):
+        return tuple(x.tolist())
+    return tuple(x)
+
+
+def _to_tuple_or_has_length(x: Union[HasLength, Iterable[complex]]) -> Union[HasLength, Tuple[complex, ...]]:
+    if isinstance(x, HasLength):
+        return x
+    return tuple(complex(v) for v in x)
+
+
+def _to_complex_matrix_or_shape(
+    x: Union[Shaped, Iterable[Iterable[complex]]]
 ) -> Union[Shaped, NDArray[np.complex128]]:
     if isinstance(x, Shaped):
         return x
@@ -33,21 +54,21 @@ def _to_block_unitaries_or_shape(
 
 
 @attrs.frozen
-class BlockPrepareHouseholderStateQROAM(GateWithRegisters):
-    r"""Prepare block-indexed Householder states.
+class PrepareHouseholderStateQROAM(GateWithRegisters):
+    r"""Prepare the Householder state used in Sec. 4.
 
-    For each block ``j`` and column ``k``, this prepares
+    For the kth column vector `state_coefficients = u_k`, this prepares, up to a global phase,
 
     $$
-        |w_{j,k}\rangle = (|1\rangle |k\rangle - |0\rangle |u_{j,k}\rangle)/\sqrt{2}
+        |w_k\rangle = \frac{|1\rangle |k\rangle - |0\rangle |u_k\rangle}{\sqrt{2}}.
     $$
 
-    while leaving the block register ``|j>`` unchanged.
+    `phase_gradient` is a catalyst required by `StatePreparationViaQROAMRotations`; it is returned
+    unchanged and is not part of the reflected subspace.
     """
 
-    state_coefficients: Union[Shaped, NDArray[np.complex128]] = attrs.field(
-        converter=lambda x: x if isinstance(x, Shaped) else np.asarray(x, dtype=np.complex128),
-        eq=False,
+    state_coefficients: Union[HasLength, Tuple[complex, ...]] = attrs.field(
+        converter=_to_tuple_or_has_length
     )
     phase_bitsize: SymbolicInt
     basis_index: int
@@ -60,47 +81,30 @@ class BlockPrepareHouseholderStateQROAM(GateWithRegisters):
     )
 
     def __attrs_post_init__(self):
-        assert len(shape(self.state_coefficients)) == 2
-        n_blocks, n_rows = shape(self.state_coefficients)
-        if not is_symbolic(n_blocks):
-            assert n_blocks >= 1
-        if not is_symbolic(n_rows):
-            assert n_rows == 2**self.system_bitsize
-            assert 0 <= self.basis_index < n_rows
+        n_coeff = slen(self.state_coefficients)
+        if not is_symbolic(n_coeff):
+            assert n_coeff == 2**self.system_bitsize
+            assert 0 <= self.basis_index < n_coeff
         if not is_symbolic(self.phase_bitsize):
             assert self.phase_bitsize > 1
-        if isinstance(self.state_coefficients, np.ndarray):
-            norms = np.linalg.norm(self.state_coefficients, axis=1)
-            assert np.allclose(norms, np.ones_like(norms))
-
-    @property
-    def n_blocks(self) -> SymbolicInt:
-        return shape(self.state_coefficients)[0]
-
-    @property
-    def n_rows(self) -> SymbolicInt:
-        return shape(self.state_coefficients)[1]
-
-    @property
-    def block_bitsize(self) -> SymbolicInt:
-        return bit_length(self.n_blocks - 1)
+        if isinstance(self.state_coefficients, tuple):
+            assert np.isclose(np.linalg.norm(self.state_coefficients), 1)
 
     @property
     def system_bitsize(self) -> SymbolicInt:
-        return bit_length(self.n_rows - 1)
+        return bit_length(slen(self.state_coefficients) - 1)
 
     @property
     def signature(self) -> Signature:
         return Signature.build(
-            block=self.block_bitsize,
             reflection_ancilla=1,
             system=self.system_bitsize,
             phase_gradient=self.phase_bitsize,
         )
 
     @property
-    def state_prep(self) -> BlockStatePreparationViaQROAMRotations:
-        return BlockStatePreparationViaQROAMRotations(
+    def state_prep(self) -> StatePreparationViaQROAMRotations:
+        return StatePreparationViaQROAMRotations(
             state_coefficients=self.state_coefficients,
             phase_bitsize=self.phase_bitsize,
             control_bitsize=1,
@@ -109,13 +113,15 @@ class BlockPrepareHouseholderStateQROAM(GateWithRegisters):
             adjoint_log_block_sizes=self.adjoint_log_block_sizes,
         )
 
-    def adjoint(self) -> "BlockPrepareHouseholderStateQROAM":
+    def adjoint(self) -> 'PrepareHouseholderStateQROAM':
         return attrs.evolve(self, uncompute=not self.uncompute)
 
     def _basis_one_positions(self) -> Tuple[int, ...]:
         if is_symbolic(self.system_bitsize):
             return ()
-        return tuple(qi for qi in range(int(self.system_bitsize)) if (self.basis_index >> qi) & 1)
+        return tuple(
+            qi for qi in range(int(self.system_bitsize)) if (self.basis_index >> qi) & 1
+        )
 
     def _apply_basis_cnot_ladder(
         self, bb: BloqBuilder, reflection_ancilla: Soquet, system_qubits: NDArray
@@ -127,40 +133,27 @@ class BlockPrepareHouseholderStateQROAM(GateWithRegisters):
         return reflection_ancilla, system_qubits
 
     def _apply_controlled_state_prep(
-        self,
-        bb: BloqBuilder,
-        block: Optional[Soquet],
-        reflection_ancilla: Soquet,
-        system: Soquet,
-        phase_gradient: Soquet,
-    ) -> Tuple[Optional[Soquet], Soquet, Soquet, Soquet]:
+        self, bb: BloqBuilder, reflection_ancilla: Soquet, system: Soquet, phase_gradient: Soquet
+    ) -> Tuple[Soquet, Soquet, Soquet]:
         reflection_ancilla = bb.add(XGate(), q=reflection_ancilla)
-        extra_soqs = {"block": block} if block is not None else {}
-        out_soqs = bb.add_d(
+        reflection_ancilla, system, phase_gradient = bb.add(
             self.state_prep,
-            **extra_soqs,
             prepare_control=reflection_ancilla,
             target_state=system,
             phase_gradient=phase_gradient,
         )
-        block = cast(Soquet, out_soqs["block"]) if block is not None else None
-        reflection_ancilla = cast(Soquet, out_soqs["prepare_control"])
-        system = cast(Soquet, out_soqs["target_state"])
-        phase_gradient = cast(Soquet, out_soqs["phase_gradient"])
         reflection_ancilla = bb.add(XGate(), q=reflection_ancilla)
-        return block, reflection_ancilla, system, phase_gradient
+        return reflection_ancilla, system, phase_gradient
 
     def build_composite_bloq(self, bb: BloqBuilder, **soqs: SoquetT) -> Dict[str, SoquetT]:
-        # ``block`` is omitted from the signature when ``n_blocks == 1`` (block_bitsize=0).
-        block = soqs.pop("block", None)
         reflection_ancilla = soqs.pop("reflection_ancilla")
         system = soqs.pop("system")
         phase_gradient = soqs.pop("phase_gradient")
 
         system_qubits = bb.split(system)
         if self.uncompute:
-            block, reflection_ancilla, system, phase_gradient = self._apply_controlled_state_prep(
-                bb, block, reflection_ancilla, bb.join(system_qubits), phase_gradient
+            reflection_ancilla, system, phase_gradient = self._apply_controlled_state_prep(
+                bb, reflection_ancilla, bb.join(system_qubits), phase_gradient
             )
             system_qubits = bb.split(system)
             reflection_ancilla, system_qubits = self._apply_basis_cnot_ladder(
@@ -174,20 +167,18 @@ class BlockPrepareHouseholderStateQROAM(GateWithRegisters):
             reflection_ancilla, system_qubits = self._apply_basis_cnot_ladder(
                 bb, reflection_ancilla, system_qubits
             )
-            block, reflection_ancilla, system, phase_gradient = self._apply_controlled_state_prep(
-                bb, block, reflection_ancilla, bb.join(system_qubits), phase_gradient
+            reflection_ancilla, system, phase_gradient = self._apply_controlled_state_prep(
+                bb, reflection_ancilla, bb.join(system_qubits), phase_gradient
             )
             system_qubits = bb.split(system)
 
-        if block is not None:
-            soqs["block"] = block
         soqs["reflection_ancilla"] = reflection_ancilla
         soqs["system"] = bb.join(system_qubits)
         soqs["phase_gradient"] = phase_gradient
         return soqs
 
-    def build_call_graph(self, ssa: "SympySymbolAllocator") -> "BloqCountDictT":
-        ret: "Counter[Bloq]" = Counter()
+    def build_call_graph(self, ssa: 'SympySymbolAllocator') -> 'BloqCountDictT':
+        ret: 'Counter[Bloq]' = Counter()
         ret[Hadamard()] += 1
         ret[ZGate()] += 1
         ret[CNOT()] += len(self._basis_one_positions())
@@ -197,12 +188,11 @@ class BlockPrepareHouseholderStateQROAM(GateWithRegisters):
 
 
 @attrs.frozen
-class BlockHouseholderReflectionQROAM(GateWithRegisters):
-    """Block-diagonal reflection about block-indexed Householder states."""
+class HouseholderReflectionQROAM(GateWithRegisters):
+    r"""Reflect about the Sec. 4 Householder state prepared with QROAM rotations."""
 
-    state_coefficients: Union[Shaped, NDArray[np.complex128]] = attrs.field(
-        converter=lambda x: x if isinstance(x, Shaped) else np.asarray(x, dtype=np.complex128),
-        eq=False,
+    state_coefficients: Union[HasLength, Tuple[complex, ...]] = attrs.field(
+        converter=_to_tuple_or_has_length
     )
     phase_bitsize: SymbolicInt
     basis_index: int
@@ -214,33 +204,20 @@ class BlockHouseholderReflectionQROAM(GateWithRegisters):
     )
 
     @property
-    def n_blocks(self) -> SymbolicInt:
-        return shape(self.state_coefficients)[0]
-
-    @property
-    def n_rows(self) -> SymbolicInt:
-        return shape(self.state_coefficients)[1]
-
-    @property
-    def block_bitsize(self) -> SymbolicInt:
-        return bit_length(self.n_blocks - 1)
-
-    @property
     def system_bitsize(self) -> SymbolicInt:
-        return bit_length(self.n_rows - 1)
+        return bit_length(slen(self.state_coefficients) - 1)
 
     @property
     def signature(self) -> Signature:
         return Signature.build(
-            block=self.block_bitsize,
             reflection_ancilla=1,
             system=self.system_bitsize,
             phase_gradient=self.phase_bitsize,
         )
 
     @property
-    def prepare_w(self) -> BlockPrepareHouseholderStateQROAM:
-        return BlockPrepareHouseholderStateQROAM(
+    def prepare_w(self) -> PrepareHouseholderStateQROAM:
+        return PrepareHouseholderStateQROAM(
             state_coefficients=self.state_coefficients,
             phase_bitsize=self.phase_bitsize,
             basis_index=self.basis_index,
@@ -279,9 +256,9 @@ class BlockHouseholderReflectionQROAM(GateWithRegisters):
         soqs = bb.add_d(self.prepare_w, **soqs)
         return soqs
 
-    def build_call_graph(self, ssa: "SympySymbolAllocator") -> "BloqCountDictT":
+    def build_call_graph(self, ssa: 'SympySymbolAllocator') -> 'BloqCountDictT':
         n_reflection_qubits = 1 + self.system_bitsize
-        ret: "Counter[Bloq]" = Counter()
+        ret: 'Counter[Bloq]' = Counter()
         ret[self.prepare_w] += 1
         ret[self.prepare_w.adjoint()] += 1
         ret[XGate()] += 2
@@ -295,16 +272,30 @@ class BlockHouseholderReflectionQROAM(GateWithRegisters):
 
 
 @attrs.frozen
-class BlockUnitarySynthesisQROAM(GateWithRegisters):
-    r"""Synthesize block-diagonal unitary data ``sum_j |j><j| tensor U_j``.
+class UnitaryReflectionQROAM(GateWithRegisters):
+    r"""Synthesize the Sec. 4 block-encoding of an isometry/unitary.
 
-    ``block_unitaries`` has shape ``(n_blocks, N, n_reflections)``.  For each block ``j`` the
-    first ``n_reflections`` columns of ``U_j`` are synthesized using the Sec. 4 reflection
-    construction, while the block register is left unchanged.
+    The input `unitary` is interpreted in the conventional matrix layout: each column is one
+    target output state $|u_k\rangle$. For an $N \times K$ isometry, this applies the product of
+    `K` Householder reflections
+
+    $$
+        I - 2 |w_k\rangle\langle w_k|,\qquad
+        |w_k\rangle = (|1\rangle|k\rangle - |0\rangle|u_k\rangle)/\sqrt{2}.
+    $$
+
+    For a full $N \times N$ unitary `U`, the product implements the paper's
+
+    $$
+        W = |0\rangle\langle 1| \otimes U + |1\rangle\langle 0| \otimes U^\dagger.
+    $$
+
+    Thus initializing `reflection_ancilla` in $|1\rangle$ maps
+    $|1\rangle|\psi\rangle \mapsto |0\rangle U|\psi\rangle$ for the synthesized columns.
     """
 
-    block_unitaries: Union[Shaped, NDArray[np.complex128]] = attrs.field(
-        converter=_to_block_unitaries_or_shape, eq=False
+    unitary: Union[Shaped, NDArray[np.complex128]] = attrs.field(
+        converter=_to_complex_matrix_or_shape, eq=False
     )
     phase_bitsize: SymbolicInt
     log_block_sizes: Optional[Tuple[SymbolicInt, ...]] = attrs.field(
@@ -315,74 +306,75 @@ class BlockUnitarySynthesisQROAM(GateWithRegisters):
     )
 
     def __attrs_post_init__(self):
-        assert len(shape(self.block_unitaries)) == 3
-        n_blocks, n_rows, n_cols = shape(self.block_unitaries)
-        if not is_symbolic(n_blocks):
-            assert n_blocks >= 1
-        if not is_symbolic(n_rows):
-            assert n_rows == 2**self.system_bitsize
-        if not is_symbolic(n_rows, n_cols):
-            assert n_cols <= n_rows
-        if isinstance(self.block_unitaries, np.ndarray):
-            for block in range(self.block_unitaries.shape[0]):
-                gram = self.block_unitaries[block].conj().T @ self.block_unitaries[block]
-                assert np.allclose(gram, np.eye(self.block_unitaries.shape[2]), atol=1e-8)
+        if isinstance(self.unitary, np.ndarray):
+            assert self.unitary.ndim == 2
+        if isinstance(self.unitary, Shaped):
+            n_rows, n_cols = self.unitary.shape
+            if not is_symbolic(n_rows):
+                assert n_rows == 2**bit_length(n_rows - 1)
+            if not is_symbolic(n_rows, n_cols):
+                assert n_cols <= n_rows
+            return
+        n_rows, n_cols = self.unitary.shape
+        assert n_rows == 2**self.system_bitsize
+        assert n_cols <= n_rows
+        gram = self.unitary.conj().T @ self.unitary
+        assert np.allclose(gram, np.eye(n_cols), atol=1e-8)
+
+    @property
+    def system_bitsize(self) -> SymbolicInt:
+        return bit_length(self.unitary.shape[0] - 1)
+
+    @property
+    def n_reflections(self) -> SymbolicInt:
+        return self.unitary.shape[1]
 
     @classmethod
     def from_shape(
         cls,
-        n_blocks: SymbolicInt,
-        n_rows: SymbolicInt,
+        data_len_or_shape: Union[SymbolicInt, Tuple[SymbolicInt, SymbolicInt]],
         phase_bitsize: SymbolicInt,
         *,
         n_reflections: Optional[SymbolicInt] = None,
         log_block_sizes: Optional[Union[SymbolicInt, Iterable[SymbolicInt]]] = None,
         adjoint_log_block_sizes: Optional[Union[SymbolicInt, Iterable[SymbolicInt]]] = None,
-    ) -> "BlockUnitarySynthesisQROAM":
-        n_cols = n_reflections if n_reflections is not None else n_rows
+    ) -> 'UnitaryReflectionQROAM':
+        """Build a dense, data-free unitary/isometry synthesis bloq for resource estimates.
+
+        Args:
+            data_len_or_shape: Either `N` for a square `N x N` unitary, or `(N, K)` for an
+                `N x K` isometry with `K` specified columns.
+            phase_bitsize: Bitsize for state-preparation rotation tables.
+            n_reflections: Optional `K` when `data_len_or_shape` is given as `N`.
+        """
+        if isinstance(data_len_or_shape, tuple):
+            n_rows, n_cols = data_len_or_shape
+            assert n_reflections is None
+        else:
+            n_rows = data_len_or_shape
+            n_cols = n_reflections if n_reflections is not None else n_rows
         return cls(
-            block_unitaries=Shaped((n_blocks, n_rows, n_cols)),
+            unitary=Shaped((n_rows, n_cols)),
             phase_bitsize=phase_bitsize,
             log_block_sizes=log_block_sizes,
             adjoint_log_block_sizes=adjoint_log_block_sizes,
         )
 
     @property
-    def n_blocks(self) -> SymbolicInt:
-        return shape(self.block_unitaries)[0]
-
-    @property
-    def n_rows(self) -> SymbolicInt:
-        return shape(self.block_unitaries)[1]
-
-    @property
-    def n_reflections(self) -> SymbolicInt:
-        return shape(self.block_unitaries)[2]
-
-    @property
-    def block_bitsize(self) -> SymbolicInt:
-        return bit_length(self.n_blocks - 1)
-
-    @property
-    def system_bitsize(self) -> SymbolicInt:
-        return bit_length(self.n_rows - 1)
-
-    @property
     def signature(self) -> Signature:
         return Signature.build(
-            block=self.block_bitsize,
             reflection_ancilla=1,
             system=self.system_bitsize,
             phase_gradient=self.phase_bitsize,
         )
 
-    def reflection(self, basis_index: int) -> BlockHouseholderReflectionQROAM:
-        state_coefficients: Union[Shaped, NDArray[np.complex128]]
-        if isinstance(self.block_unitaries, Shaped):
-            state_coefficients = Shaped((self.n_blocks, self.n_rows))
+    def reflection(self, basis_index: int) -> HouseholderReflectionQROAM:
+        state_coefficients: Union[HasLength, Tuple[complex, ...]]
+        if isinstance(self.unitary, Shaped):
+            state_coefficients = HasLength(self.unitary.shape[0])
         else:
-            state_coefficients = self.block_unitaries[:, :, basis_index]
-        return BlockHouseholderReflectionQROAM(
+            state_coefficients = tuple(self.unitary[:, basis_index])
+        return HouseholderReflectionQROAM(
             state_coefficients=state_coefficients,
             phase_bitsize=self.phase_bitsize,
             basis_index=basis_index,
@@ -391,17 +383,17 @@ class BlockUnitarySynthesisQROAM(GateWithRegisters):
         )
 
     def build_composite_bloq(self, bb: BloqBuilder, **soqs: SoquetT) -> Dict[str, SoquetT]:
-        if isinstance(self.block_unitaries, Shaped):
+        if isinstance(self.unitary, Shaped):
             raise DecomposeTypeError(f"cannot decompose data-free {self}")
-        for basis_index in range(int(self.n_reflections)):
+        for basis_index in range(self.n_reflections):
             soqs = bb.add_d(self.reflection(basis_index), **soqs)
         return soqs
 
-    def build_call_graph(self, ssa: "SympySymbolAllocator") -> "BloqCountDictT":
-        ret: "Counter[Bloq]" = Counter()
+    def build_call_graph(self, ssa: 'SympySymbolAllocator') -> 'BloqCountDictT':
+        ret: 'Counter[Bloq]' = Counter()
         if is_symbolic(self.n_reflections):
             ret[self.reflection(0)] += self.n_reflections
             return ret
-        for basis_index in range(int(self.n_reflections)):
+        for basis_index in range(self.n_reflections):
             ret[self.reflection(basis_index)] += 1
         return ret

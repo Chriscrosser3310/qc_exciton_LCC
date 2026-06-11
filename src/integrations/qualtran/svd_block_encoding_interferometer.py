@@ -36,11 +36,12 @@ from typing import Dict, Optional, Tuple, TYPE_CHECKING, Union
 import attrs
 import numpy as np
 
-from qualtran import Bloq, BloqBuilder, QAny, QBit, QUInt, Register, Signature, SoquetT
+from qualtran import Bloq, BloqBuilder, CtrlSpec, QAny, QBit, QUInt, Register, Signature, SoquetT
 from qualtran.bloqs.basic_gates import Hadamard
 from qualtran.bloqs.block_encoding import BlockEncoding
 from qualtran.bloqs.block_encoding.lcu_block_encoding import PrepareIdentity
 from qualtran.bloqs.data_loading.qroam_clean import QROAMClean, QROAMCleanAdjoint
+from qualtran.bloqs.mcmt.specialized_ctrl import get_ctrl_system_1bit_cv_from_bloqs
 from qualtran.bloqs.rotations.phase_gradient import AddIntoPhaseGrad
 from qualtran.bloqs.state_preparation.prepare_base import PrepareOracle
 from qualtran.symbolics import bit_length, is_symbolic, SymbolicFloat, SymbolicInt
@@ -48,17 +49,22 @@ from qualtran.symbolics import bit_length, is_symbolic, SymbolicFloat, SymbolicI
 try:
     from .block_unitary_interferometer_QROAM import (
         BlockUnitaryInterferometerSynthesisQROAM,
+        _ControlledBlockUnitaryInterferometerSynthesisQROAM,
         _data_max_log_block_sizes,
+        optimal_interferometer_log_block_sizes,
     )
     from .state_prep_QROAM import _cap_log_block_sizes, _to_tuple_or_none
 except ImportError:
     from block_unitary_interferometer_QROAM import (
         BlockUnitaryInterferometerSynthesisQROAM,
+        _ControlledBlockUnitaryInterferometerSynthesisQROAM,
         _data_max_log_block_sizes,
+        optimal_interferometer_log_block_sizes,
     )
     from state_prep_QROAM import _cap_log_block_sizes, _to_tuple_or_none
 
 if TYPE_CHECKING:
+    from qualtran import AddControlledT
     from qualtran.resource_counting import BloqCountDictT, SympySymbolAllocator
 
 
@@ -109,21 +115,43 @@ class SVDBlockEncodingInterferometer(BlockEncoding):
     phase_bitsize: SymbolicInt
     n_layers: Optional[SymbolicInt] = None
     n_rows_logical: Optional[SymbolicInt] = None
+    n_cols_logical: Optional[SymbolicInt] = None
     interferometer_log_block_sizes: Optional[Tuple[SymbolicInt, ...]] = attrs.field(
-        default=None, converter=_to_tuple_or_none
+        default=(0, 0), converter=_to_tuple_or_none
     )
     interferometer_final_log_block_sizes: Optional[Tuple[SymbolicInt, ...]] = attrs.field(
-        default=None, converter=_to_tuple_or_none
+        default=(0, 0), converter=_to_tuple_or_none
     )
     interferometer_final_adjoint_log_block_sizes: Optional[Tuple[SymbolicInt, ...]] = attrs.field(
-        default=None, converter=_to_tuple_or_none
+        default=(0, 0), converter=_to_tuple_or_none
     )
     diag_log_block_sizes: Optional[Tuple[SymbolicInt, ...]] = attrs.field(
-        default=None, converter=_to_tuple_or_none
+        default=(0, 0), converter=_to_tuple_or_none
     )
     diag_adjoint_log_block_sizes: Optional[Tuple[SymbolicInt, ...]] = attrs.field(
-        default=None, converter=_to_tuple_or_none
+        default=(0, 0), converter=_to_tuple_or_none
     )
+    optimal_T: bool = False
+
+    def __attrs_post_init__(self):
+        if self.optimal_T:
+            if is_symbolic(self.n_blocks, self.n_rows, self.phase_bitsize):
+                raise ValueError("optimal_T=True requires concrete n_blocks, n_rows, phase_bitsize")
+            opt = optimal_interferometer_log_block_sizes(
+                int(self.n_blocks), int(self.n_rows), int(self.phase_bitsize)
+            )
+            # n_blocks == 1 drops the block axis from every QROAM data shape (1-D), so the
+            # stored log_block_sizes must be 1-D too (the block split is 0 anyway).
+            if int(self.n_blocks) == 1:
+                opt = (opt[-1],)
+            for field in (
+                'interferometer_log_block_sizes',
+                'interferometer_final_log_block_sizes',
+                'interferometer_final_adjoint_log_block_sizes',
+                'diag_log_block_sizes',
+                'diag_adjoint_log_block_sizes',
+            ):
+                object.__setattr__(self, field, opt)
 
     # --------------------------- Local shape helpers ---------------------------
 
@@ -187,7 +215,11 @@ class SVDBlockEncodingInterferometer(BlockEncoding):
             log_block_sizes=self.interferometer_log_block_sizes,
             final_log_block_sizes=self.interferometer_final_log_block_sizes,
             final_adjoint_log_block_sizes=self.interferometer_final_adjoint_log_block_sizes,
+            optimal_T=self.optimal_T,
         )
+
+    def _effective_diag_lbs(self, raw: Optional[Tuple[SymbolicInt, ...]]):
+        return raw
 
     @property
     def diag_data_shape(self) -> Tuple[SymbolicInt, ...]:
@@ -203,7 +235,9 @@ class SVDBlockEncodingInterferometer(BlockEncoding):
         return QROAMClean.build_from_bitsize(
             self.diag_data_shape,
             target_bitsizes=(self.phase_bitsize,),
-            log_block_sizes=self._capped_diag_lbs(self.diag_log_block_sizes),
+            log_block_sizes=self._capped_diag_lbs(
+                self._effective_diag_lbs(self.diag_log_block_sizes)
+            ),
         )
 
     @property
@@ -211,8 +245,8 @@ class SVDBlockEncodingInterferometer(BlockEncoding):
         # target_shapes must equal the *forward* QROAM block_sizes (that is the shape
         # of the target+junk registers the adjoint receives).  log_block_sizes is
         # independent and tunes the adjoint's own measurement-based uncompute.
-        adj_lbs = self._capped_diag_lbs(self.diag_adjoint_log_block_sizes)
-        fwd_lbs = self._capped_diag_lbs(self.diag_log_block_sizes)
+        adj_lbs = self._capped_diag_lbs(self._effective_diag_lbs(self.diag_adjoint_log_block_sizes))
+        fwd_lbs = self._capped_diag_lbs(self._effective_diag_lbs(self.diag_log_block_sizes))
         kwargs = dict(target_bitsizes=(self.phase_bitsize,), log_block_sizes=adj_lbs)
         if fwd_lbs is not None:
             kwargs['target_shapes'] = (tuple(1 << b for b in fwd_lbs),)
@@ -231,6 +265,21 @@ class SVDBlockEncodingInterferometer(BlockEncoding):
         ret[self.ctrl_phase_grad_add] += 1           # Ry(2 theta) on BE ancilla
         ret[self.diag_qroam_adjoint] += 1            # uncompute angle register
         return ret
+
+    def get_ctrl_system(self, ctrl_spec: "CtrlSpec") -> "Tuple[Bloq, AddControlledT]":
+        """Cheap single-qubit control: only the rotation-bearing sub-bloqs gain a control.
+
+        ``.controlled()`` returns :class:`_ControlledSVDBlockEncodingInterferometer`,
+        which controls the two interferometers (each via the cheap
+        :class:`_ControlledBlockUnitaryInterferometerSynthesisQROAM`) and promotes the
+        diagonal ctrl-Ry to a doubly-controlled phase-gradient add.  The QROAM
+        forward/uncompute pairs stay uncontrolled (they cancel when ctrl = 0).
+        """
+        return get_ctrl_system_1bit_cv_from_bloqs(
+            self, ctrl_spec, current_ctrl_bit=None,
+            bloq_with_ctrl=_ControlledSVDBlockEncodingInterferometer(self),
+            ctrl_reg_name='ctrl',
+        )
 
     # --------------------------- Composite circuit -----------------------------
 
@@ -343,3 +392,55 @@ class SVDBlockEncodingInterferometer(BlockEncoding):
             system = matrix
 
         return {'system': system, 'ancilla': be_anc, 'resource': phase_grad}
+
+
+@attrs.frozen
+class _ControlledSVDBlockEncodingInterferometer(BlockEncoding):
+    r"""Singly-controlled :class:`SVDBlockEncodingInterferometer`.
+
+    Adds one ``ctrl`` qubit.  The control propagates only into the AddIntoPhaseGrad
+    operations: the U and V interferometers are controlled via
+    :class:`_ControlledBlockUnitaryInterferometerSynthesisQROAM` (extra control reaches
+    only their phase-gradient adds), and the diagonal singular-value rotation becomes a
+    doubly-controlled phase-gradient add.  The diagonal QROAM forward/uncompute pair is
+    left uncontrolled.  Cost is therefore essentially that of the uncontrolled bloq.
+    """
+
+    inner: "SVDBlockEncodingInterferometer"
+
+    @cached_property
+    def system_bitsize(self) -> SymbolicInt:
+        return self.inner.system_bitsize
+
+    @cached_property
+    def ancilla_bitsize(self) -> SymbolicInt:
+        return self.inner.ancilla_bitsize
+
+    @cached_property
+    def resource_bitsize(self) -> SymbolicInt:
+        return self.inner.resource_bitsize
+
+    @property
+    def alpha(self) -> SymbolicFloat:
+        return self.inner.alpha
+
+    @property
+    def epsilon(self) -> SymbolicFloat:
+        return self.inner.epsilon
+
+    @cached_property
+    def signal_state(self) -> PrepareOracle:
+        return self.inner.signal_state
+
+    @cached_property
+    def signature(self) -> Signature:
+        return Signature([Register('ctrl', QBit()), *self.inner.signature])
+
+    def build_call_graph(self, ssa: "SympySymbolAllocator") -> "BloqCountDictT":
+        b = self.inner.phase_bitsize
+        ret: "Counter[Bloq]" = Counter()
+        ret[_ControlledBlockUnitaryInterferometerSynthesisQROAM(self.inner.interferometer)] += 2
+        ret[self.inner.diag_qroam] += 1
+        ret[AddIntoPhaseGrad(b, b).controlled().controlled()] += 1  # cc-Ry on BE ancilla
+        ret[self.inner.diag_qroam_adjoint] += 1
+        return ret

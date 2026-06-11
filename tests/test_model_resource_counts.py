@@ -194,7 +194,7 @@ def test_estimator_matches_closed_form():
         assert est.qubits == ref.qubits, (n_blocks, n_rows, b, l_load, l_final_adj)
 
 
-def test_block_unitary_synthesis_toffoli_validates_inputs():
+def test_block_unitary_reflection_toffoli_validates_inputs():
     with pytest.raises(ValueError):
         block_unitary_synthesis_toffoli(1, 3, 4, 1)  # n_rows not power of two
     with pytest.raises(ValueError):
@@ -209,7 +209,7 @@ def test_block_unitary_synthesis_toffoli_validates_inputs():
         block_unitary_synthesis_toffoli(128, 4, 4, 1)  # missing intercept entry
 
 
-def test_block_unitary_synthesis_toffoli_decomposition_identity():
+def test_block_unitary_reflection_toffoli_decomposition_identity():
     """Analytic count must match ``K * (slope*b + I_1)`` exactly."""
     import math as _math
 
@@ -222,20 +222,20 @@ def test_block_unitary_synthesis_toffoli_decomposition_identity():
                 ) == K * (slope * b + I_1)
 
 
-def test_block_unitary_synthesis_toffoli_matches_bloq():
+def test_block_unitary_reflection_toffoli_matches_bloq():
     """Analytic estimator and the Bloq's QECGatesCost agree exactly on the grid."""
     qualtran = pytest.importorskip("qualtran")
     _ = qualtran
     from qualtran.resource_counting import QECGatesCost, get_cost_value
 
-    from integrations.qualtran.block_unitary_synthesis_QROAM import (
-        BlockUnitarySynthesisQROAM,
+    from integrations.qualtran.block_unitary_reflection_QROAM import (
+        BlockUnitaryReflectionQROAM,
     )
 
     for (n_blocks, N) in SYNTHESIS_PER_REFLECTION_INTERCEPT:
         for b in (2, 4, 8):
             for K in (1, max(1, N // 2), N):
-                bloq = BlockUnitarySynthesisQROAM.from_shape(
+                bloq = BlockUnitaryReflectionQROAM.from_shape(
                     n_blocks=n_blocks, n_rows=N, phase_bitsize=b, n_reflections=K
                 )
                 bloq_t = get_cost_value(bloq, QECGatesCost()).toffoli
@@ -243,7 +243,7 @@ def test_block_unitary_synthesis_toffoli_matches_bloq():
                 assert bloq_t == analytic_t, (n_blocks, N, b, K, bloq_t, analytic_t)
 
 
-def test_block_unitary_synthesis_signature_qubits_validates_inputs():
+def test_block_unitary_reflection_signature_qubits_validates_inputs():
     with pytest.raises(ValueError):
         block_unitary_synthesis_signature_qubits(1, 3, 4)  # n_rows not power of two
     with pytest.raises(ValueError):
@@ -252,7 +252,7 @@ def test_block_unitary_synthesis_signature_qubits_validates_inputs():
         block_unitary_synthesis_signature_qubits(1, 4, 0)  # bitsize must be positive
 
 
-def test_block_unitary_synthesis_signature_qubits_formula():
+def test_block_unitary_reflection_signature_qubits_formula():
     # ceil_log2(1) + 1 + log2(4) + 2 = 0 + 1 + 2 + 2 = 5
     assert block_unitary_synthesis_signature_qubits(1, 4, 2) == 5
     # ceil_log2(64) + 1 + log2(256) + 32 = 6 + 1 + 8 + 32 = 47
@@ -261,17 +261,17 @@ def test_block_unitary_synthesis_signature_qubits_formula():
     assert block_unitary_synthesis_signature_qubits(3, 8, 4) == 2 + 1 + 3 + 4
 
 
-def test_block_unitary_synthesis_signature_qubits_matches_bloq():
+def test_block_unitary_reflection_signature_qubits_matches_bloq():
     """Analytic signature qubit count must equal ``bloq.signature.n_qubits()``."""
     qualtran = pytest.importorskip("qualtran")
     _ = qualtran
-    from integrations.qualtran.block_unitary_synthesis_QROAM import (
-        BlockUnitarySynthesisQROAM,
+    from integrations.qualtran.block_unitary_reflection_QROAM import (
+        BlockUnitaryReflectionQROAM,
     )
 
     for (n_blocks, N) in SYNTHESIS_PER_REFLECTION_INTERCEPT:
         for b in (2, 8, 32):
-            bloq = BlockUnitarySynthesisQROAM.from_shape(
+            bloq = BlockUnitaryReflectionQROAM.from_shape(
                 n_blocks=n_blocks, n_rows=N, phase_bitsize=b, n_reflections=1
             )
             assert (
@@ -280,7 +280,7 @@ def test_block_unitary_synthesis_signature_qubits_matches_bloq():
             ), (n_blocks, N, b)
 
 
-def test_block_unitary_synthesis_count_composes_existing_estimators():
+def test_block_unitary_reflection_count_composes_existing_estimators():
     """``block_unitary_synthesis_count`` must compose the three analytic helpers."""
     for n_blocks, n_rows, b, K in [
         (1, 4, 2, 1),
@@ -305,7 +305,7 @@ def test_block_unitary_synthesis_count_composes_existing_estimators():
         )
 
 
-def test_block_unitary_synthesis_count_propagates_validation():
+def test_block_unitary_reflection_count_propagates_validation():
     """The wrapper must inherit input validation from its underlying helpers."""
     with pytest.raises(ValueError):
         block_unitary_synthesis_count(1, 3, 4, 1)  # n_rows not power of two
@@ -315,7 +315,7 @@ def test_block_unitary_synthesis_count_propagates_validation():
         block_unitary_synthesis_count(128, 4, 4, 1)  # off-grid intercept
 
 
-def test_block_unitary_synthesis_workspace_qubits_validates_inputs():
+def test_block_unitary_reflection_workspace_qubits_validates_inputs():
     """``block_unitary_synthesis_workspace_qubits`` rejects bad inputs and off-grid points."""
     with pytest.raises(ValueError):
         block_unitary_synthesis_workspace_qubits(1, 3, 4)  # n_rows not power of two
@@ -329,7 +329,7 @@ def test_block_unitary_synthesis_workspace_qubits_validates_inputs():
         block_unitary_synthesis_workspace_qubits(128, 4, 4)  # n_blocks off-grid
 
 
-def test_block_unitary_synthesis_workspace_table_consistent():
+def test_block_unitary_reflection_workspace_table_consistent():
     """Pure-Python invariants on ``SYNTHESIS_WORKSPACE_QUBITS``.
 
     The table is parameterized over the same ``(n_blocks, n_rows)`` 49-point
@@ -343,7 +343,7 @@ def test_block_unitary_synthesis_workspace_table_consistent():
             assert SYNTHESIS_WORKSPACE_QUBITS[(nb, N, b)] > 0
 
 
-def test_block_unitary_synthesis_workspace_table_monotone():
+def test_block_unitary_reflection_workspace_table_monotone():
     """Structural monotonicity invariants on the tabulated workspace.
 
     The cycle-10 ``test_workspace_monotone_in_n_blocks`` /
@@ -388,24 +388,24 @@ def test_block_unitary_synthesis_workspace_table_monotone():
                 prev = v
 
 
-def test_block_unitary_synthesis_count_total_qubits_matches_bloq():
+def test_block_unitary_reflection_count_total_qubits_matches_bloq():
     """``total_qubits = signature + workspace`` must equal the Bloq's ``QubitCount`` exactly.
 
     Cross-checks across the same 49-point grid x bitsizes the table covers.
     This is the qubit-side analog of
-    ``test_block_unitary_synthesis_toffoli_matches_bloq``.
+    ``test_block_unitary_reflection_toffoli_matches_bloq``.
     """
     qualtran = pytest.importorskip("qualtran")
     _ = qualtran
     from qualtran.resource_counting import QubitCount, get_cost_value
-    from integrations.qualtran.block_unitary_synthesis_QROAM import (
-        BlockUnitarySynthesisQROAM,
+    from integrations.qualtran.block_unitary_reflection_QROAM import (
+        BlockUnitaryReflectionQROAM,
     )
 
     for (nb, N) in SYNTHESIS_PER_REFLECTION_INTERCEPT.keys():
         for b in (2, 4, 8, 16, 32):
             rec = block_unitary_synthesis_count(nb, N, b, 1)
-            bloq = BlockUnitarySynthesisQROAM.from_shape(
+            bloq = BlockUnitaryReflectionQROAM.from_shape(
                 n_blocks=nb, n_rows=N, phase_bitsize=b, n_reflections=1
             )
             qc = int(get_cost_value(bloq, QubitCount()))
@@ -458,7 +458,7 @@ def test_synthesis_panel_power_law_sublinear():
     the ``n_blocks`` dependence still comes only from ``I_1(n_blocks, N)``
     and ``workspace_qubits``, both of which grow sub-linearly with
     ``n_blocks``. This is the report-visible signature of the QROAMClean
-    amortization pinned by ``test_block_unitary_synthesis_amortization``,
+    amortization pinned by ``test_block_unitary_reflection_amortization``,
     and is the property the summary page's ``synth_t``/``synth_q`` fits
     advertise. A regression that broke sub-linearity (e.g. an accidental
     per-block QROAM table) would surface here without needing to re-run

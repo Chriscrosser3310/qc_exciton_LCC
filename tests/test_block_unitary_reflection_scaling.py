@@ -1,7 +1,7 @@
-"""Scaling-invariants for ``BlockUnitarySynthesisQROAM`` Toffoli costs.
+"""Scaling-invariants for ``BlockUnitaryReflectionQROAM`` Toffoli costs.
 
 These tests pin structural identities that hold for the Bloq-side Toffoli
-count ``QECGatesCost`` of ``BlockUnitarySynthesisQROAM``:
+count ``QECGatesCost`` of ``BlockUnitaryReflectionQROAM``:
 
 * The total Toffoli count is exactly linear in the number of reflections
   ``K = n_reflections`` — each reflection has the same call graph and they
@@ -10,13 +10,13 @@ count ``QECGatesCost`` of ``BlockUnitarySynthesisQROAM``:
   ``K * 2 * (n + 1)`` where ``n = log2(n_rows)``. The slope is independent
   of ``n_blocks``.
 * The shape-only resource path
-  (``BlockUnitarySynthesisQROAM.from_shape(...)``) and the data-bearing
+  (``BlockUnitaryReflectionQROAM.from_shape(...)``) and the data-bearing
   constructor with random unitaries agree on the Toffoli cost across the
   full ``(n_blocks, n_rows, K=n_reflections, b)`` grid considered here.
 
-This complements ``test_block_unitary_synthesis_equivalence.py``, which
+This complements ``test_block_unitary_reflection_equivalence.py``, which
 covers the single-block (``n_blocks=1``) reduction to
-``UnitarySynthesisQROAM``. Together, the two test files form the
+``UnitaryReflectionQROAM``. Together, the two test files form the
 analytic-vs-Bloq guard for the synthesis bloq, analogous to
 ``test_estimator_matches_closed_form`` for the interferometer bloq.
 """
@@ -62,13 +62,13 @@ _ = qualtran
 
 from qualtran.resource_counting import QECGatesCost, get_cost_value
 
-from integrations.qualtran.block_unitary_synthesis_QROAM import (
-    BlockUnitarySynthesisQROAM,
+from integrations.qualtran.block_unitary_reflection_QROAM import (
+    BlockUnitaryReflectionQROAM,
 )
 
 
 def _toffoli_from_shape(n_blocks: int, n_rows: int, b: int, K: int) -> int:
-    bloq = BlockUnitarySynthesisQROAM.from_shape(
+    bloq = BlockUnitaryReflectionQROAM.from_shape(
         n_blocks=n_blocks, n_rows=n_rows, phase_bitsize=b, n_reflections=K
     )
     return get_cost_value(bloq, QECGatesCost()).toffoli
@@ -147,7 +147,7 @@ def test_shape_only_matches_data_bearing_multi_block():
         blocks_data = np.stack(
             [_random_unitary(N, seed=1000 + i + 7 * n_blocks)[:, :K] for i in range(n_blocks)]
         )
-        data_bloq = BlockUnitarySynthesisQROAM(
+        data_bloq = BlockUnitaryReflectionQROAM(
             block_unitaries=blocks_data, phase_bitsize=b
         )
         t_data = get_cost_value(data_bloq, QECGatesCost()).toffoli
@@ -157,10 +157,10 @@ def test_shape_only_matches_data_bearing_multi_block():
 
 def test_n_reflections_default_is_n_rows():
     """from_shape with no n_reflections uses K = N (square full unitary)."""
-    bloq_default = BlockUnitarySynthesisQROAM.from_shape(
+    bloq_default = BlockUnitaryReflectionQROAM.from_shape(
         n_blocks=2, n_rows=8, phase_bitsize=6
     )
-    bloq_explicit = BlockUnitarySynthesisQROAM.from_shape(
+    bloq_explicit = BlockUnitaryReflectionQROAM.from_shape(
         n_blocks=2, n_rows=8, phase_bitsize=6, n_reflections=8
     )
     t_default = get_cost_value(bloq_default, QECGatesCost()).toffoli

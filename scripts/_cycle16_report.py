@@ -72,12 +72,12 @@ def cover_page():
 def math_page():
     fig, ax = _begin_page("Closed-form decomposition (recap)")
     blocks = [
-        (0.91, "Toffoli decomposition pinned by tests/test_block_unitary_synthesis_scaling.py:"),
+        (0.91, "Toffoli decomposition pinned by tests/test_block_unitary_reflection_scaling.py:"),
         (0.86, r"$T(M, N, K, b) \, = \, K \cdot ( \, 2 (\log_2 N + 1) \, b \; + \; I_1(M, N) \, )$"),
         (0.78, r"where $M$ = n_blocks, $N$ = n_rows, $K$ = n_reflections, $b$ = phase_bitsize."),
         (0.73, r"$I_1(M, N)$ is the per-reflection $b=0$ intercept tabulated as"),
         (0.68, r"$\mathrm{SYNTHESIS\_PER\_REFLECTION\_INTERCEPT}$ in model_resource_counts.py."),
-        (0.61, "Qubit decomposition pinned by tests/test_block_unitary_synthesis_qubit_count.py:"),
+        (0.61, "Qubit decomposition pinned by tests/test_block_unitary_reflection_qubit_count.py:"),
         (0.56, r"$Q(M, N, b) \, = \, [\, \lceil \log_2 M \rceil + 1 + \log_2 N + b \,]_{\mathrm{sig}} \; + \; W(M, N, b)$"),
         (0.48, r"where $W$ is the transient QROAMClean workspace tabulated as"),
         (0.43, r"$\mathrm{SYNTHESIS\_WORKSPACE\_QUBITS}$."),
@@ -100,7 +100,7 @@ def helper_page():
         (0.83, r"$b \in \{2, 4, 8, 16, 32\}$  (workspace only)"),
         (0.76, "Intercept extraction:"),
         (0.72, r"$I_1(M, N) \, = \, T_{\mathrm{bloq}}(M, N, K{=}1, b{=}b_{\mathrm{ref}}) \, - \, 2(\log_2 N + 1) \, b_{\mathrm{ref}}$"),
-        (0.65, r"with $b_{\mathrm{ref}} = 4$.  Uses $\mathrm{QECGatesCost}$ on $\mathrm{BlockUnitarySynthesisQROAM.from\_shape}$."),
+        (0.65, r"with $b_{\mathrm{ref}} = 4$.  Uses $\mathrm{QECGatesCost}$ on $\mathrm{BlockUnitaryReflectionQROAM.from\_shape}$."),
         (0.58, "Workspace extraction:"),
         (0.54, r"$W(M, N, b) \, = \, \mathrm{QubitCount}(\mathrm{bloq}) \, - \, |\mathrm{signature}|$"),
         (0.47, "Modes:"),
@@ -120,7 +120,7 @@ def tests_page():
     fig, ax = _begin_page("Tests & checks")
     rows = [
         ("tests/test_regenerate_synthesis_tables.py", "4/4 passed (new)"),
-        ("tests/test_block_unitary_synthesis_b_intercept.py", "6/6 passed (unaffected)"),
+        ("tests/test_block_unitary_reflection_b_intercept.py", "6/6 passed (unaffected)"),
         ("tests/test_model_resource_counts.py", "31/31 passed (unaffected)"),
         ("scripts/regenerate_synthesis_tables.py --check (full sweep)", "245 + 49 entries match"),
     ]
