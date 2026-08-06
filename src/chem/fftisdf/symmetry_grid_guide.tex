@@ -1,0 +1,221 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{parskip}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage[colorlinks=true,linkcolor=blue,urlcolor=blue]{hyperref}
+
+\newcommand{\obj}{\textbf{object}}
+\title{\vspace{-1.2cm}Reorganizing the ISDF Grid by Crystal Symmetry\\[2pt]
+\large A step-by-step, plain-language guide from the $(k,I)$ basis to symmetry labels}
+\author{}
+\date{\today}
+
+\begin{document}
+\maketitle
+\vspace{-1.0cm}
+
+\section*{What this note is about}
+
+In the FFT--ISDF / THC representation of the electron repulsion integrals, everything is built from
+two objects living on an \emph{interpolation grid}: the interpolation vectors $X$ (\texttt{inpv\_kpt})
+and the central Coulomb tensor $W$ (\texttt{coul\_kpt}). Their natural index is $(k,I)$: a crystal
+momentum $k$ and an interpolation point $I$.
+
+This note explains, in plain language and one small step at a time, \textbf{how the crystal's
+space-group symmetry lets you relabel that $(k,I)$ basis into ``symmetry-adapted'' labels}, and why
+doing so makes a symmetric object like $W$ collapse to a tiny amount of data. It is a conceptual /
+intuition-building guide, not a derivation. The running example throughout is \textbf{diamond on a
+$2\times2\times2$ $k$-mesh}, where there are $n_k=8$ momenta and $n_{\mathrm{IP}}=136$ interpolation
+points (so $8\times136=1088$ basis states in all), and the crystal has $48$ rotation/reflection
+symmetries.
+
+\textbf{The starting point.} We assume we are already in the $(k,I)$ basis. Getting there is the
+Fourier transform over lattice cells, which ``uses up'' the translational symmetry and makes $k$ a
+good label. What remains to organize is the \textbf{point group} --- the $48$ rotations and
+reflections --- which does two things: it moves the momenta $k$ around, and it shuffles the
+interpolation points $I$. The five steps below are how you fold that remaining symmetry into the
+labels.
+
+\section*{Step 1 --- Group the $k$-points into families}
+
+Bring in the crystal's rotations and reflections. Each one, applied to a momentum $k$, moves it to
+\emph{another} momentum (rotating the arrow $k$). Take one $k$-point and hit it with all the
+rotations/reflections: you get a \textbf{family of $k$-points that get shuffled among each other}.
+The $8$ momenta of diamond $2\times2\times2$ fall into $\mathbf{3}$ families:
+\begin{itemize}[nosep]
+  \item \textbf{Family A:} just $(0,0,0)$ --- the center; every rotation leaves it where it is, so it
+        is alone.
+  \item \textbf{Family B ($4$ points):} $(0,0,\tfrac12),(0,\tfrac12,0),(\tfrac12,0,0),(\tfrac12,\tfrac12,\tfrac12)$ ---
+        rotations shuffle these four into each other.
+  \item \textbf{Family C ($3$ points):} $(0,\tfrac12,\tfrac12),(\tfrac12,0,\tfrac12),(\tfrac12,\tfrac12,0)$.
+\end{itemize}
+($1+4+3=8$.) Within a family, the rotations only carry you from one member to another.
+
+\section*{Step 2 --- At one $k$ per family, keep the operations that leave it fixed}
+
+Pick one representative from each family. Of the $48$ operations, split them (for that specific $k$)
+into the ones that \emph{move} it to another family member and the ones that \textbf{leave it exactly
+in place}. Keep only the ``leave-it-fixed'' ones. Counting them:
+\begin{itemize}[nosep]
+  \item $(0,0,0)$: it is the center, so \textbf{all $48$} leave it fixed.
+  \item $(0,0,\tfrac12)$: only \textbf{$12$} leave it fixed; the other $36$ move it to its $3$ family-mates.
+  \item $(0,\tfrac12,\tfrac12)$: \textbf{$16$} leave it fixed.
+\end{itemize}
+Tidy bookkeeping: $(\text{family size})\times(\text{number that leave it fixed})=48$ every time
+($1\times48$, $4\times12$, $3\times16$) --- the operations spread the point evenly across its family.
+
+\section*{Step 3 --- Reorganize that $k$-point's $136$ interpolation points into simple patterns}
+
+At the representative $k$-point you have its $136$ interpolation points, and the ``leave-it-fixed''
+operations from Step~2 shuffle those points among themselves. Now build \textbf{combinations}
+(weighted sums) of the $136$ points that behave in the \emph{simplest possible ways} under those
+operations:
+\begin{itemize}[nosep]
+  \item \textbf{size-1 pattern:} a combination that each operation just multiplies by a number (a
+        phase); it never mixes with anything else.
+  \item \textbf{size-2 pattern:} a pair of combinations the operations only rotate into each other.
+  \item likewise size-3, etc.
+\end{itemize}
+Sort all $136$ dimensions into such self-contained patterns. Each new basis vector then carries two
+tags: \textbf{which pattern-type} it is, and \textbf{which copy} (the same pattern-type usually shows
+up several times among the $136$). This is the only real computation --- and it is small, because
+only $\sim\!12$ (or $16$, or $48$) operations are involved.
+
+\section*{Step 4 --- Copy each pattern across the rest of its family}
+
+Step~3 was done at just \emph{one} $k$ per family. The other members are reached with the ``move-it''
+operations from Step~2, so you don't redo the work --- you \textbf{copy the patterns over}. Applying
+the operation that sends the representative to another family member carries a copy of the pattern to
+that $k$-point. A pattern that started at a single $k$ now has \textbf{one piece sitting at each
+family member}, so its size grows:
+\[
+   (\text{size at the representative } d)\ \times\ (\text{family size } f)\ =\ \text{full size } f\times d .
+\]
+For diamond (family sizes $1,4,3$; representative pattern sizes $1,2,3$):
+\[
+  \underbrace{1\times\{1,2,3\}}_{\text{Family A}}=\{1,2,3\},\quad
+  \underbrace{4\times\{1,2\}}_{\text{Family B}}=\{4,8\},\quad
+  \underbrace{3\times\{1,2\}}_{\text{Family C}}=\{3,6\},
+\]
+i.e.\ exactly the set of block sizes $\{1,2,3,4,6,8\}$ that the full calculation produces.
+
+\section*{Step 5 --- Read off the labels, and see what you bought}
+
+Every new basis vector now carries \textbf{three tags}:
+\begin{itemize}[nosep]
+  \item \textbf{which big object} $i$ = (family, pattern-type);
+  \item \textbf{where inside it}, $a$ = (which family-member $k$)\,$\times$\,(which slot in the size-$d$
+        pattern) --- there are $m_i=f\times d$ slots;
+  \item \textbf{which copy} $c$.
+\end{itemize}
+The transformation from $(k,I)$ to $(i,a,c)$ is exactly this relabeling. And in this basis:
+\begin{itemize}[nosep]
+  \item \textbf{a rotation/reflection} just shuffles the \emph{slots} $a$ inside one object --- it
+        never mixes different objects $i$, and never touches the copy $c$;
+  \item \textbf{a symmetric object like $W$} does the opposite: it leaves every slot alone (acts
+        identically on all slots) and only \emph{mixes the copies} $c$ within an object.
+\end{itemize}
+So all of $W$'s content is a small ``copy $\times$ copy'' matrix, one per object --- instead of a full
+$1088\times1088$ matrix, you keep only $\sum(\text{copies})^2$ numbers. (For diamond $2\times2\times2$
+that is $3384$ numbers instead of $\sim\!1.5\times10^5$, about a $44\times$ reduction.)
+
+\section*{The whole thing in one breath}
+
+\begin{enumerate}[nosep]
+  \item Fourier gets you to $(k,I)$, using up the translations so $k$ is a good label.
+  \item Rotations sort the momenta into \textbf{families}.
+  \item At one $k$ per family, the fixed-in-place operations carve the interpolation points into
+        small \textbf{patterns} (type + copy).
+  \item Copy each pattern across its family $\to$ \textbf{big objects} of size (family)\,$\times$\,(pattern).
+  \item Relabel everything as \textbf{(object, slot, copy)}. Symmetries then shuffle slots, while
+        symmetric operators only mix copies --- so the operator's data collapses to tiny per-object
+        matrices.
+\end{enumerate}
+
+The one fact worth remembering: \textbf{a group operation moves the slots and leaves the copies alone;
+a symmetric operator leaves the slots alone and moves the copies}. They are mirror images, which is
+exactly why the symmetric operator's data lives entirely in the (few) copies.
+
+\section*{Appendix: the structure of the transformation $Q$ itself}
+
+Call $Q$ the change of basis that carries $(k,I)$ to the symmetry labels $(i,a,c)$. It is a square
+$N\times N$ unitary, $N=\sum_i m_i n_i$. Its structure, from coarse to fine:
+
+\paragraph{(1) Block-diagonal in $k$.} Every symmetry-adapted basis vector lives at a \emph{single}
+momentum (Step~5), so
+\[
+   Q=\bigoplus_{k} Q^{(k)},\qquad \text{$n_k$ blocks, each } n_{\mathrm{IP}}\times n_{\mathrm{IP}} .
+\]
+Equivalently, $Q_{(k,I),(i,a,c)}=0$ unless the momentum stored in $a$ equals $k$: $Q$ never mixes
+different momenta.
+
+\paragraph{(2) Only one block per family is independent.} The $k$-blocks inside one family are not
+free: the block at $g\!\cdot\!k$ is the symmetry-image of the block at $k$ (apply the ``move-it''
+operation $g$ --- a grid permutation with phases --- and relabel). So you only need \textbf{one block
+per family}; the rest are generated.
+
+\paragraph{(3) Each independent block is itself block-diagonal over patterns.} A representative block
+$Q^{(k_0)}$ is the ``reorganize the interpolation points into patterns'' map of Step~3. In its natural
+form it is block-diagonal over the interpolation-point orbits (under the operations that fix $k_0$),
+with each orbit-block of size at most the number of those fixed operations. (A block built naively
+from a single invariant operator instead comes out dense inside $Q^{(k_0)}$; the orbit-by-orbit
+construction is the sparse, structured one.)
+
+\paragraph{(4) Unique data.} Collecting (1)--(3), the genuinely independent content of $Q$ is
+\[
+   \#\{\text{independent entries}\}=\sum_{\text{family reps}}\ \sum_{\text{orbits }o}|o|^2 ,
+\]
+one small $|o|\times|o|$ unitary per orbit, over one representative per family. Crucially these numbers
+are \textbf{fixed by the crystal symmetry and the interpolation-point positions alone} --- $Q$ carries
+\emph{no material data}. In practice one never stores $Q$ densely; it is regenerated from the crystal,
+the interpolation-point set, and a few group generators.
+
+\paragraph{How entries are related (summary).}
+(i) zero unless the momentum matches;
+(ii) a non-representative $k$-block equals the group-image of its family representative;
+(iii) inside a representative block, entries across different orbits are zero, and within an orbit they
+are the little-group symmetry-adaptation coefficients (pure group theory).
+
+\subsection*{The diamond $2\times2\times2$ example ($48$ operations)}
+
+Here $N=n_k\, n_{\mathrm{IP}}=8\times136=1088$. The successive structures shrink the entry count as:
+
+\begin{center}
+\begin{tabular}{lr}
+\hline
+structure exploited & complex entries\\
+\hline
+dense $\;(n_k\, n_{\mathrm{IP}})^2$ & $1{,}183{,}744$\\
+block-diagonal in $k\;\;(n_k\, n_{\mathrm{IP}}^2)$ & $147{,}968$\\
+one block per family $\;(3\times136^2)$ & $55{,}488$\\
+orbit-block-diagonal (\textbf{unique data}) & $\mathbf{6{,}800}$\\
+\hline
+\end{tabular}
+\end{center}
+
+The final $6{,}800$ splits over the three family representatives as $\sum_o |o|^2$:
+
+\begin{center}
+\begin{tabular}{lccr}
+\hline
+family rep & \# fixed ops & interpolation-point orbit sizes & $\sum_o|o|^2$\\
+\hline
+$\Gamma\ (0,0,0)$ & $48$ & $48,24,24,12,12,8,8$ & $3872$\\
+X$\ (0,0,\tfrac12)$ & $12$ & six $12$'s, ten $6$'s, two $2$'s & $1232$\\
+L$\ (0,\tfrac12,\tfrac12)$ & $16$ & five $16$'s, six $8$'s, two $4$'s & $1696$\\
+\hline
+\multicolumn{3}{r}{total} & $\mathbf{6800}$\\
+\hline
+\end{tabular}
+\end{center}
+
+So the whole transformation --- naively a $1088\times1088$ matrix with $\sim\!1.2$ million entries ---
+is fixed by only about $\mathbf{6800}$ genuinely independent numbers ($\approx174\times$ smaller),
+organized as a handful of small ($\le48$) unitaries over just $3$ family representatives, and those
+numbers are pure symmetry/geometry rather than material data. In short: $Q$ is
+\textbf{block-diagonal in $k$, its blocks are symmetry-copies across each family, and each block is a
+direct sum of little ($\le48$-dimensional) pattern-unitaries.}
+
+\end{document}

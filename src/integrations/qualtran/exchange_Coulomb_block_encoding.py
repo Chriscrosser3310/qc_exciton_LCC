@@ -55,7 +55,7 @@ import attrs
 from qualtran import Bloq, CtrlSpec, QAny, QBit, QUInt, Register, Signature
 from qualtran.bloqs.block_encoding import BlockEncoding
 from qualtran.bloqs.block_encoding.lcu_block_encoding import PrepareIdentity
-from qualtran.bloqs.arithmetic import Negate, Subtract  # ModSub has Qualtran bugs; Subtract/Negate as cost proxies
+from qualtran.bloqs.arithmetic import LessThanConstant, Negate, Subtract  # ModSub has Qualtran bugs; Subtract/Negate as cost proxies
 
 from qualtran.bloqs.mcmt.specialized_ctrl import get_ctrl_system_1bit_cv_from_bloqs
 from qualtran.bloqs.state_preparation import PrepareUniformSuperposition
@@ -71,6 +71,7 @@ try:
     )
     from .classical_matrix_block_encoding_QROAM import (
         BlockDiagonalClassicalMatrixBlockEncoding,
+        DirectHermitianBlockEncoding,
     )
     from .rectangular_block_encoding_reflection import (
         ReflectionRectangularBlockEncoding,
@@ -85,6 +86,7 @@ except ImportError:
     )
     from classical_matrix_block_encoding_QROAM import (
         BlockDiagonalClassicalMatrixBlockEncoding,
+        DirectHermitianBlockEncoding,
     )
     from rectangular_block_encoding_reflection import (
         ReflectionRectangularBlockEncoding,
@@ -174,6 +176,31 @@ class ExchangeCoulombBlockEncoding(BlockEncoding):
     # "reflection" (LKS Householder, default) or "column" (column-by-column isometry
     # synthesis, Iten 1501.06911 + Berry Eq. 24).  The central A'_Q is unaffected.
     outer_synthesis: str = "reflection"
+    # Restrict each orbital input to its physical range with a comparator.  Each outer X
+    # channel acts on an N_k x N_IP system register (block k + matrix sized to
+    # ceil(log2 N_IP)), and the full construction on two such registers (double).  When
+    # True a ``LessThanConstant`` flags ``mu < N_up`` (= N_o) and ``nu < N_down`` (= N_v)
+    # into a 1-qubit ancilla per channel, restraining the encoded operator's input to the
+    # physical orbital subspace (computed + uncomputed; O(log N_IP) Toffoli).
+    restrict_input: bool = True
+    # When True, wrap the central W^q block encoding in
+    # :class:`DirectHermitianBlockEncoding` (W = (H (x) I) S (H (x) I), S = [[0,U],[U^dag,0]])
+    # so the central *unitary* is Hermitian (W = W^dag, W^2 = I) while block-encoding the SAME
+    # Hermitian Coulomb kernel A'_Q.  Costs ~2x the base central block encoding and one extra
+    # ancilla qubit (accounted for in ``ancilla_bitsize``).  Requires A'_Q = (A'_Q)^dag.
+    hermitian_central: bool = False
+    # When True, encode the central A'_Q via the *Hermitian Frobenius-norm* block encoding:
+    # the Clader-Frobenius dense block-matrix BE (:class:`BlockDiagonalClassicalMatrixBlockEncoding`,
+    # ``U_A = U_L^dag U_R``) wrapped in :class:`DirectHermitianBlockEncoding` so the central
+    # *unitary* is Hermitian and involutive (W = W^dag, W^2 = I).  This is the single switch the
+    # qubitization *BSE walk operator* uses to make the whole exchange sandwich ``B C B^dag``
+    # Hermitian-unitary (``B`` is a genuine unitary, so ``B C B^dag`` is an involution exactly
+    # when the central ``C`` is).  Selects the Frobenius base (like ``use_fro_BE``) AND forces
+    # the Hermitian wrap (like ``hermitian_central``) in one toggle; it takes precedence over
+    # ``use_fro_BE`` / ``central_via_reflection`` for the base choice and adds the one Hermitian
+    # flag ancilla.  The SVD / diagonal block encodings used elsewhere are already involutive
+    # (they apply ``Z R_y`` rather than ``R_y``), so only the full-matrix central needs this.
+    hermitian_fro_central: bool = False
 
     def __attrs_post_init__(self):
         if self.outer_synthesis not in ("reflection", "column"):
@@ -240,11 +267,15 @@ class ExchangeCoulombBlockEncoding(BlockEncoding):
 
     @cached_property
     def ancilla_bitsize(self) -> SymbolicInt:
-        # Two outer BEs' ancillas (matrix-row aux + flag) + middle BE's ancilla.
+        # Two outer BEs' ancillas (matrix-row aux + flag) + middle BE's ancilla, plus
+        # (when restrict_input) one input-range comparator flag per orbital channel.
         n_up = bit_length(self.n_rows_up - 1)
         n_down = bit_length(self.n_rows_down - 1)
         n_mid = bit_length(self.n_rows_inner - 1)
-        return (n_up + 1) + (n_down + 1) + (n_mid + 1)
+        cmp_flags = 2 if self.restrict_input else 0
+        # DirectHermitianBlockEncoding adds one Hermitian-flag ancilla to the central BE.
+        herm_flag = 1 if (self.hermitian_central or self.hermitian_fro_central) else 0
+        return (n_up + 1) + (n_down + 1) + (n_mid + 1) + cmp_flags + herm_flag
 
     @cached_property
     def resource_bitsize(self) -> SymbolicInt:
@@ -322,15 +353,31 @@ class ExchangeCoulombBlockEncoding(BlockEncoding):
 
     @property
     def C_inner(self) -> BlockEncoding:
+        """Central block encoding of ``A'_Q``; Hermitian-unitary-wrapped if requested.
+
+        When ``hermitian_central`` is set, the chosen base block encoding (SVD / reflection
+        / Clader-Frobenius) is wrapped in :class:`DirectHermitianBlockEncoding` so the
+        central unitary is Hermitian (``W = W^dag``) while encoding the SAME ``A'_Q``; this
+        adds one ancilla and doubles the central cost.
+        """
+        base = self._base_C_inner
+        if self.hermitian_central or self.hermitian_fro_central:
+            return DirectHermitianBlockEncoding(base)
+        return base
+
+    @property
+    def _base_C_inner(self) -> BlockEncoding:
         # Central block encoding of A'_Q (square, N_IP x N_IP).  Two choices:
         #   * SVD interferometer (default, ``central_via_reflection=False``): cheapest
         #     known full-rank N x N block encoding with alpha = 1.
         #   * Householder reflection isometry (``central_via_reflection=True``): uses
         #     n_reflections = N_IP block reflections on the padded n_rows_inner-dim
         #     register, sharing the outer reflection lbs (same padded dim).
-        #   * Clader-Frobenius block-matrix BE (``use_fro_BE=True``, takes precedence):
-        #     U_A = U_L^dag U_R column/row state preparation; alpha = F_max.
-        if self.use_fro_BE:
+        #   * Clader-Frobenius block-matrix BE (``use_fro_BE=True``, or the Hermitian
+        #     ``hermitian_fro_central=True`` which additionally wraps it in
+        #     :class:`DirectHermitianBlockEncoding` -- see ``C_inner``): U_A = U_L^dag U_R
+        #     column/row state preparation; alpha = F_max.
+        if self.use_fro_BE or self.hermitian_fro_central:
             return BlockDiagonalClassicalMatrixBlockEncoding.from_bitsize(
                 n_blocks=self.N_k,
                 n_rows=self.n_rows_inner,
@@ -379,6 +426,17 @@ class ExchangeCoulombBlockEncoding(BlockEncoding):
     def uniform_prep(self) -> Bloq:
         return PrepareUniformSuperposition(n=self.N_k)
 
+    @property
+    def input_comparator_up(self) -> Bloq:
+        # Restrain the mu input (occupied): flag x < N_up (= N_o) on the N_IP-sized matrix
+        # register of the up channel.  Negligible O(log N_IP) Toffoli.
+        return LessThanConstant(bitsize=bit_length(self.n_rows_up - 1), less_than_val=self.N_up)
+
+    @property
+    def input_comparator_down(self) -> Bloq:
+        # Restrain the nu input (virtual): flag x < N_down (= N_v) on the down channel.
+        return LessThanConstant(bitsize=bit_length(self.n_rows_down - 1), less_than_val=self.N_down)
+
     # --------------------- Resource counts ---------------------
 
     def build_call_graph(self, ssa: "SympySymbolAllocator") -> "BloqCountDictT":
@@ -388,6 +446,10 @@ class ExchangeCoulombBlockEncoding(BlockEncoding):
         # outer component twice rather than emitting an explicit .adjoint().
         # (Qualtran's QROAMClean has an unhashable internal field that breaks the
         # default Adjoint resource walk, and we don't need the structural label.)
+        # Restrain each orbital input to its physical N_o / N_v range (compute + uncompute).
+        if self.restrict_input:
+            ret[self.input_comparator_up] += 2
+            ret[self.input_comparator_down] += 2
         ret[self.B_up] += 2
         ret[self.B_down] += 2
         if self.N_k > 1:
@@ -461,6 +523,9 @@ class _ControlledExchangeCoulombBlockEncoding(BlockEncoding):
         ret: "Counter[Bloq]" = Counter()
         # Sandwich identity: only C is promoted to a controlled BE.  Outer B and
         # B^dagger cancel pairwise on ext_ctrl = 0 so they stay uncontrolled.
+        if self.inner.restrict_input:
+            ret[self.inner.input_comparator_up] += 2
+            ret[self.inner.input_comparator_down] += 2
         ret[self.inner.B_up] += 2
         ret[self.inner.B_down] += 2
         if self.inner.N_k > 1:

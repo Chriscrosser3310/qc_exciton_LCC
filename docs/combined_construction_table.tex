@@ -1,0 +1,41 @@
+\begin{table}[htbp]
+  \centering
+  \caption{Toffoli cost and total qubits of the combined construction
+           $6X_o + 6X_v + W$, $W = 2\,(\text{diagonal}) + (\text{central})$
+           ($N_\mathrm{up}=4$, $N_\mathrm{down}=22$, $N_\mathrm{IP}=208$, $N_k=216$, $b=32$).
+           \%\,$X = (6X_o+6X_v)/\text{total}$; \%\,$W$ the central+diagonal share.
+           Qubits $= 6\lceil\log_2 N_\mathrm{IP}\rceil + \max$ over the (sequentially applied)
+           component ancilla footprints. Cheapest total per column in \textbf{bold}.}
+  \setlength{\tabcolsep}{4pt}
+  \begin{tabular}{llrrrrrrrr}
+    \toprule
+    & & \multicolumn{4}{c}{T-opt} & \multicolumn{4}{c}{Q-opt} \\
+    \cmidrule(lr){3-6}\cmidrule(lr){7-10}
+    $X$ synth & Central & Total & \%\,$X$ & \%\,$W$ & Qubits & Total & \%\,$X$ & \%\,$W$ & Qubits \\
+    \midrule
+    Reflection & Reflection & 7{,}810{,}260 & 42.16 & 57.84 & 8{,}255 & 198{,}280{,}218 & 34.78 & 65.22 & 131 \\
+     & Reflection (3-phase) & 21{,}449{,}652 & 15.35 & 84.65 & 8{,}255 & 244{,}426{,}266 & 28.21 & 71.79 & 131 \\
+     & Interferometer & 4{,}882{,}170 & 67.45 & 32.55 & 8{,}255 & 120{,}889{,}011 & 57.04 & 42.96 & 159 \\
+     & Frobenius & 3{,}612{,}533 & 91.15 & 8.85 & 16{,}489 & 148{,}971{,}776 & 46.29 & 53.71 & 146 \\
+     & Recursive CSD & 39{,}983{,}246 & 8.24 & 91.76 & 8{,}255 & 150{,}190{,}757 & 45.91 & 54.09 & 222 \\
+    \midrule
+    Reflection (3-phase) & Reflection & 18{,}039{,}804 & 74.96 & 25.04 & 8{,}255 & 232{,}889{,}754 & 44.47 & 55.53 & 131 \\
+     & Reflection (3-phase) & 31{,}679{,}196 & 42.69 & 57.31 & 8{,}255 & 279{,}035{,}802 & 37.12 & 62.88 & 128 \\
+     & Interferometer & 15{,}111{,}714 & 89.48 & 10.52 & 8{,}255 & 155{,}498{,}547 & 66.60 & 33.40 & 159 \\
+     & Frobenius & 13{,}842{,}077 & 97.69 & 2.31 & 16{,}489 & 183{,}581{,}312 & 56.41 & 43.59 & 146 \\
+     & Recursive CSD & 50{,}212{,}790 & 26.93 & 73.07 & 8{,}255 & 184{,}800{,}293 & 56.04 & 43.96 & 222 \\
+    \midrule
+    Isometry & Reflection & 6{,}124{,}176 & 26.24 & 73.76 & 8{,}255 & 139{,}476{,}498 & 7.28 & 92.72 & 159 \\
+     & Reflection (3-phase) & 19{,}763{,}568 & 8.13 & 91.87 & 8{,}255 & 185{,}622{,}546 & 5.47 & 94.53 & 159 \\
+     & Interferometer & 3{,}196{,}086 & 50.28 & 49.72 & 8{,}255 & \textbf{62{,}085{,}291} & 16.35 & 83.65 & 159 \\
+     & Frobenius & \textbf{1{,}926{,}449} & 83.41 & 16.59 & 16{,}489 & 90{,}168{,}056 & 11.26 & 88.74 & 159 \\
+     & Recursive CSD & 38{,}297{,}162 & 4.20 & 95.80 & 8{,}255 & 91{,}387{,}037 & 11.11 & 88.89 & 222 \\
+    \midrule
+    Interferometer isometry & Reflection & 6{,}479{,}586 & 30.28 & 69.72 & 8{,}255 & 144{,}506{,}082 & 10.51 & 89.49 & 158 \\
+     & Reflection (3-phase) & 20{,}118{,}978 & 9.75 & 90.25 & 8{,}255 & 190{,}652{,}130 & 7.96 & 92.04 & 158 \\
+     & Interferometer & 3{,}551{,}496 & 55.25 & 44.75 & 8{,}255 & 67{,}114{,}875 & 22.62 & 77.38 & 159 \\
+     & Frobenius & 2{,}281{,}859 & 86.00 & 14.00 & 16{,}489 & 95{,}197{,}640 & 15.95 & 84.05 & 158 \\
+     & Recursive CSD & 38{,}652{,}572 & 5.08 & 94.92 & 8{,}255 & 96{,}416{,}621 & 15.75 & 84.25 & 222 \\
+    \bottomrule
+  \end{tabular}
+\end{table}

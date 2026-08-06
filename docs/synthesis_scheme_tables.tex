@@ -1,0 +1,52 @@
+% \usepackage{booktabs}
+% Toffoli counts at N_k=256, N_IP=208, N_up=4, N_down=22, b=32.
+
+\begin{table}[htbp]
+  \centering
+  \caption{Toffoli cost of the outer $X$-matrix isometry encoders ($X_o$=up, $N_\mathrm{up}=4$; $X_v$=down, $N_\mathrm{down}=22$).}
+  \begin{tabular}{lrrrr}
+    \toprule
+    & \multicolumn{2}{c}{$X_o$} & \multicolumn{2}{c}{$X_v$} \\
+    \cmidrule(lr){2-3}\cmidrule(lr){4-5}
+    Synthesis & T-opt & Q-opt & T-opt & Q-opt \\
+    \midrule
+    Reflection (Grover) & 96{,}892 & 2{,}095{,}172 & 532{,}906 & 11{,}523{,}446 \\
+    Reflection (three-phase-layer) & 409{,}132 & 3{,}147{,}076 & 2{,}250{,}226 & 17{,}308{,}918 \\
+    Interferometer isometry & 70{,}836 & 653{,}053 & 289{,}050 & 2{,}342{,}409 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{table}[htbp]
+  \centering
+  \caption{Toffoli cost of the central $W$ block encoder (single application).}
+  \begin{tabular}{lrr}
+    \toprule
+    Scheme & T-opt & Q-opt \\
+    \midrule
+    Interferometer & 1{,}630{,}262 & 17{,}234{,}537 \\
+    Reflection (Grover) & 5{,}038{,}384 & 108{,}948{,}944 \\
+    Reflection (three-phase-layer) & 21{,}274{,}864 & 163{,}647{,}952 \\
+    Frobenius & 212{,}166 & 50{,}529{,}582 \\
+    Recursive CSD & 39{,}559{,}498 & 49{,}086{,}043 \\
+    Diagonal (direct central) & 68{,}918 & 22{,}151{,}223 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{table}[htbp]
+  \centering
+  \caption{Total Toffoli cost of the full block encoding ($2X_o + 2X_v + W + \text{momentum bookkeeping}$). Exchange rows use the production Reflection--Grover $X$.}
+  \begin{tabular}{lrr}
+    \toprule
+    Scheme & T-opt & Q-opt \\
+    \midrule
+    Exchange, Interferometer & 2{,}889{,}886 & 44{,}471{,}801 \\
+    Exchange, Reflection (Grover) & 6{,}298{,}008 & 136{,}186{,}208 \\
+    Exchange, Reflection (three-phase-layer) & 22{,}534{,}488 & 190{,}885{,}216 \\
+    Exchange, Frobenius & 1{,}471{,}790 & 77{,}766{,}846 \\
+    Exchange, Recursive CSD & 40{,}819{,}122 & 76{,}323{,}307 \\
+    Direct (Diagonal) & 1{,}328{,}528 & 49{,}388{,}473 \\
+    \bottomrule
+  \end{tabular}
+\end{table}

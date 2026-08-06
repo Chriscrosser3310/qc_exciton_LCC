@@ -127,6 +127,7 @@ class RectangularBlockEncodingReflection(BlockEncoding):
         default=(0, 0), converter=_to_tuple_or_none
     )
     optimal_T: bool = False
+    three_phase_layer_prep: bool = False
 
     def __attrs_post_init__(self):
         if self.optimal_T:
@@ -231,6 +232,7 @@ class RectangularBlockEncodingReflection(BlockEncoding):
             phase_adjoint_log_block_sizes=self.phase_adjoint_log_block_sizes,
             optimal_T=self.optimal_T,
             transpose=self.transposed,
+            three_phase_layer_prep=self.three_phase_layer_prep,
         )
 
     # ----------------------------- Resource counts ------------------------------
@@ -325,6 +327,7 @@ class ReflectionRectangularBlockEncoding(BlockEncoding):
     # sequence reversed -> builds U^dagger), instead of its columns.  Same cost; lets a
     # rectangular A_k be encoded along whichever side has ``n_reflections`` vectors.
     transpose: bool = False
+    three_phase_layer_prep: bool = False
 
     def __attrs_post_init__(self):
         if self.optimal_T:
@@ -398,6 +401,7 @@ class ReflectionRectangularBlockEncoding(BlockEncoding):
             phase_adjoint_log_block_sizes=self.phase_adjoint_log_block_sizes,
             optimal_T=self.optimal_T,
             transpose=self.transpose,
+            three_phase_layer_prep=self.three_phase_layer_prep,
         )
 
     def build_call_graph(self, ssa: "SympySymbolAllocator") -> "BloqCountDictT":

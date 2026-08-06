@@ -57,6 +57,8 @@ from integrations.qualtran.classical_matrix_block_encoding_QROAM import (
     _coeffs_from_matrix,
     BlockDiagonalClassicalMatrixBlockEncoding,
     ClassicalMatrixBlockEncoding,
+    DirectHermitianBlockEncoding,
+    HermitianOffDiagonalBlockEncoding,
 )
 from integrations.qualtran.state_prep_QROAM import StatePreparationViaQROAMRotations
 
@@ -372,6 +374,129 @@ def test_block_controlled_overhead_is_small():
     base = _gate_costs(be).toffoli + _gate_costs(be).and_bloq
     ctrl = _gate_costs(cbe).toffoli + _gate_costs(cbe).and_bloq
     assert base <= ctrl <= base * 1.01 + 1000
+
+
+# =============================================================================
+# Off-diagonal Hermitian block-encoding via S = [[0, U], [U^dag, 0]]  (App. A 1)
+# =============================================================================
+
+
+def test_hermitian_dilation_S_algebra():
+    """Pin the construction: for ANY block-encoding U of A, the off-diagonal dilation
+    S = [[0, U], [U^dag, 0]] block-encodes [[0, A], [A^dag, 0]] at the same alpha
+    (projecting only U's ancilla).  Verified on an explicit (cosine-sine) dilation U."""
+    from scipy.linalg import sqrtm
+
+    rng = np.random.default_rng(1)
+    for n in (2, 3):
+        A = rng.standard_normal((n, n)) + 1j * rng.standard_normal((n, n))
+        alpha = 3.0 * np.linalg.norm(A, 2)
+        B = A / alpha
+        T1 = sqrtm(np.eye(n) - B @ B.conj().T)
+        T2 = sqrtm(np.eye(n) - B.conj().T @ B)
+        U = np.block([[B, T1], [T2, -B.conj().T]])         # unitary, top-left = A/alpha
+        assert np.allclose(U.conj().T @ U, np.eye(2 * n))
+        blkU = U[:n, :n]
+        blkUd = U.conj().T[:n, :n]
+        M_S = np.block([[np.zeros((n, n)), blkU], [blkUd, np.zeros((n, n))]])
+        Abar = np.block([[np.zeros((n, n)), A / alpha], [(A / alpha).conj().T, np.zeros((n, n))]])
+        assert np.allclose(M_S, Abar)                      # S block-encodes [[0,A],[A^dag,0]]
+        assert np.allclose(Abar, Abar.conj().T)            # Hermitian
+
+
+def test_hermitian_signature_and_alpha():
+    inner = ClassicalMatrixBlockEncoding.from_bitsize(256, 32, optimal_T=True)
+    be = HermitianOffDiagonalBlockEncoding.from_inner(inner)
+    assert [r.name for r in be.signature] == ["system", "ancilla", "resource"]
+    assert be.system_bitsize == inner.system_bitsize + 1   # + off-diagonal index qubit
+    assert be.ancilla_bitsize == inner.ancilla_bitsize     # e lives in the system, NOT ancilla
+    assert be.resource_bitsize == inner.resource_bitsize
+    assert be.alpha == inner.alpha                          # alpha = ||A||_F (not 2||A||_F)
+
+
+def test_hermitian_from_matrix_alpha_is_frobenius():
+    rng = np.random.default_rng(22)
+    A = rng.standard_normal((8, 4))
+    be = HermitianOffDiagonalBlockEncoding.from_matrix(A, phase_bitsize=12)
+    assert np.isclose(be.alpha, np.linalg.norm(A))
+
+
+def test_hermitian_cost_is_two_inner_calls():
+    inner = ClassicalMatrixBlockEncoding.from_bitsize(256, 32, optimal_T=True)
+    be = HermitianOffDiagonalBlockEncoding.from_inner(inner)
+    t_inner = _gate_costs(inner).total_t_count()
+    t_be = _gate_costs(be).total_t_count()
+    # S = C[U] + C[U^dag] + X  ->  ~2x inner, never below 2x-inner
+    assert 1.95 * t_inner <= t_be <= 2.1 * t_inner + 100
+
+
+def test_hermitian_cheaper_than_doubled_space():
+    # The S-construction (reuse inner twice, ~2x) must beat a fresh block-encoding over the
+    # doubled 2N-dim space (the P^dag SWAP P route), which costs ~that of a 2N x 2N matrix.
+    N, b = 256, 32
+    s_cost = _gate_costs(
+        HermitianOffDiagonalBlockEncoding.from_bitsize(N, N, b, optimal_T=True)
+    ).total_t_count()
+    doubled = _gate_costs(
+        ClassicalMatrixBlockEncoding.from_bitsize(2 * N, b, optimal_T=True)
+    ).total_t_count()
+    assert s_cost < doubled
+
+
+def test_hermitian_wraps_any_inner():
+    for inner in (
+        ClassicalMatrixBlockEncoding.from_bitsize(64, 16, optimal_T=True),
+        BlockDiagonalClassicalMatrixBlockEncoding.from_bitsize(8, 64, 16, optimal_T=True),
+    ):
+        be = HermitianOffDiagonalBlockEncoding.from_inner(inner)
+        assert be.system_bitsize == inner.system_bitsize + 1
+        assert be.ancilla_bitsize == inner.ancilla_bitsize
+        assert _gate_costs(be).total_t_count() >= 2 * _gate_costs(inner).total_t_count() * 0.95
+
+
+def test_hermitian_controlled_works():
+    be = HermitianOffDiagonalBlockEncoding.from_bitsize(64, 64, 16, optimal_T=True)
+    cbe = be.controlled()
+    assert "ctrl" in [r.name for r in cbe.signature]
+    assert _gate_costs(cbe).total_t_count() > 0
+
+
+# =============================================================================
+# Direct Hermitian-unitary block-encoding:  W = (H (x) I) S (H (x) I)
+# =============================================================================
+
+
+def test_direct_hermitian_signature_and_alpha():
+    inner = ClassicalMatrixBlockEncoding.from_bitsize(256, 32, optimal_T=True)
+    w = DirectHermitianBlockEncoding(inner)
+    assert [r.name for r in w.signature] == ["system", "ancilla", "resource"]
+    assert w.system_bitsize == inner.system_bitsize
+    assert w.ancilla_bitsize == inner.ancilla_bitsize + 1   # one extra Hermitian-flag qubit
+    assert w.resource_bitsize == inner.resource_bitsize
+    assert w.alpha == inner.alpha                            # subnormalization preserved
+
+
+def test_direct_hermitian_cost_is_two_inner_calls():
+    inner = ClassicalMatrixBlockEncoding.from_bitsize(256, 32, optimal_T=True)
+    w = DirectHermitianBlockEncoding(inner)
+    t_inner = _gate_costs(inner).total_t_count()
+    t_w = _gate_costs(w).total_t_count()
+    # W = 2 controlled inner calls (C[U], C[U^dag]) + Cliffords -> ~2x, never below 2x-inner
+    assert 1.95 * t_inner <= t_w <= 2.1 * t_inner + 100
+    # one extra qubit beyond the (cheap) controlled inner
+    assert get_cost_value(w, QubitCount()) <= get_cost_value(inner.controlled(), QubitCount()) + 1
+
+
+def test_direct_hermitian_wraps_any_block_encoding():
+    # Works as a generic wrapper over the other constructions in this module.
+    for inner in (
+        ClassicalMatrixBlockEncoding.from_bitsize(64, 16, optimal_T=True),
+        BlockDiagonalClassicalMatrixBlockEncoding.from_bitsize(8, 64, 16, optimal_T=True),
+        HermitianOffDiagonalBlockEncoding.from_bitsize(64, 64, 16, optimal_T=True),
+    ):
+        w = DirectHermitianBlockEncoding(inner)
+        assert w.ancilla_bitsize == inner.ancilla_bitsize + 1
+        assert _gate_costs(w).total_t_count() >= _gate_costs(inner).total_t_count()
 
 
 if __name__ == "__main__":

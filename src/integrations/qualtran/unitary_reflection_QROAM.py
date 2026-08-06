@@ -20,8 +20,10 @@ from qualtran.symbolics import bit_length, HasLength, is_symbolic, Shaped, slen,
 
 try:
     from .state_prep_QROAM import StatePreparationViaQROAMRotations
+    from .three_phase_layer_state_prep_QROAM import ThreePhaseLayerStatePreparation
 except ImportError:
     from state_prep_QROAM import StatePreparationViaQROAMRotations
+    from three_phase_layer_state_prep_QROAM import ThreePhaseLayerStatePreparation
 
 if TYPE_CHECKING:
     from qualtran.resource_counting import BloqCountDictT, SympySymbolAllocator
@@ -79,6 +81,7 @@ class PrepareHouseholderStateQROAM(GateWithRegisters):
     adjoint_log_block_sizes: Optional[Tuple[SymbolicInt, ...]] = attrs.field(
         default=None, converter=_to_tuple_or_none
     )
+    three_phase_layer_prep: bool = False
 
     def __attrs_post_init__(self):
         n_coeff = slen(self.state_coefficients)
@@ -103,7 +106,19 @@ class PrepareHouseholderStateQROAM(GateWithRegisters):
         )
 
     @property
-    def state_prep(self) -> StatePreparationViaQROAMRotations:
+    def state_prep(self) -> Bloq:
+        if self.three_phase_layer_prep:
+            # Drop-in replacement: the "three diagonal phase layers + Hadamards" ansatz
+            # (arXiv:2409.11748 p.14) with the same (prepare_control, target_state,
+            # phase_gradient) register contract.
+            return ThreePhaseLayerStatePreparation.from_bitsize(
+                n_coeff=slen(self.state_coefficients),
+                phase_bitsize=self.phase_bitsize,
+                control_bitsize=1,
+                uncompute=self.uncompute,
+                log_block_sizes=self.log_block_sizes,
+                adjoint_log_block_sizes=self.adjoint_log_block_sizes,
+            )
         return StatePreparationViaQROAMRotations(
             state_coefficients=self.state_coefficients,
             phase_bitsize=self.phase_bitsize,
@@ -202,6 +217,7 @@ class HouseholderReflectionQROAM(GateWithRegisters):
     adjoint_log_block_sizes: Optional[Tuple[SymbolicInt, ...]] = attrs.field(
         default=None, converter=_to_tuple_or_none
     )
+    three_phase_layer_prep: bool = False
 
     @property
     def system_bitsize(self) -> SymbolicInt:
@@ -223,6 +239,7 @@ class HouseholderReflectionQROAM(GateWithRegisters):
             basis_index=self.basis_index,
             log_block_sizes=self.log_block_sizes,
             adjoint_log_block_sizes=self.adjoint_log_block_sizes,
+            three_phase_layer_prep=self.three_phase_layer_prep,
         )
 
     def _reflect_around_zero(
@@ -304,6 +321,7 @@ class UnitaryReflectionQROAM(GateWithRegisters):
     adjoint_log_block_sizes: Optional[Tuple[SymbolicInt, ...]] = attrs.field(
         default=None, converter=_to_tuple_or_none
     )
+    three_phase_layer_prep: bool = False
 
     def __attrs_post_init__(self):
         if isinstance(self.unitary, np.ndarray):
@@ -338,6 +356,7 @@ class UnitaryReflectionQROAM(GateWithRegisters):
         n_reflections: Optional[SymbolicInt] = None,
         log_block_sizes: Optional[Union[SymbolicInt, Iterable[SymbolicInt]]] = None,
         adjoint_log_block_sizes: Optional[Union[SymbolicInt, Iterable[SymbolicInt]]] = None,
+        three_phase_layer_prep: bool = False,
     ) -> 'UnitaryReflectionQROAM':
         """Build a dense, data-free unitary/isometry synthesis bloq for resource estimates.
 
@@ -346,6 +365,8 @@ class UnitaryReflectionQROAM(GateWithRegisters):
                 `N x K` isometry with `K` specified columns.
             phase_bitsize: Bitsize for state-preparation rotation tables.
             n_reflections: Optional `K` when `data_len_or_shape` is given as `N`.
+            three_phase_layer_prep: replace the per-column state preparation with the
+                "three diagonal phase layers + Hadamards" ansatz (arXiv:2409.11748 p.14).
         """
         if isinstance(data_len_or_shape, tuple):
             n_rows, n_cols = data_len_or_shape
@@ -358,6 +379,7 @@ class UnitaryReflectionQROAM(GateWithRegisters):
             phase_bitsize=phase_bitsize,
             log_block_sizes=log_block_sizes,
             adjoint_log_block_sizes=adjoint_log_block_sizes,
+            three_phase_layer_prep=three_phase_layer_prep,
         )
 
     @property
@@ -380,6 +402,7 @@ class UnitaryReflectionQROAM(GateWithRegisters):
             basis_index=basis_index,
             log_block_sizes=self.log_block_sizes,
             adjoint_log_block_sizes=self.adjoint_log_block_sizes,
+            three_phase_layer_prep=self.three_phase_layer_prep,
         )
 
     def build_composite_bloq(self, bb: BloqBuilder, **soqs: SoquetT) -> Dict[str, SoquetT]:

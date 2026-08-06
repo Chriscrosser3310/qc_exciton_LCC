@@ -29,9 +29,11 @@ from qualtran.symbolics import bit_length, HasLength, is_symbolic, Shaped, shape
 try:
     from .block_state_preparation_QROAM import BlockStatePreparationViaQROAMRotations
     from .state_prep_QROAM import _to_tuple_or_none
+    from .three_phase_layer_state_prep_QROAM import ThreePhaseLayerStatePreparation
 except ImportError:
     from block_state_preparation_QROAM import BlockStatePreparationViaQROAMRotations
     from state_prep_QROAM import _to_tuple_or_none
+    from three_phase_layer_state_prep_QROAM import ThreePhaseLayerStatePreparation
 
 if TYPE_CHECKING:
     from qualtran import AddControlledT
@@ -79,6 +81,7 @@ class BlockPrepareHouseholderStateQROAM(GateWithRegisters):
         default=(0, 0), converter=_to_tuple_or_none
     )
     optimal_T: bool = False
+    three_phase_layer_prep: bool = False
 
     def __attrs_post_init__(self):
         assert len(shape(self.state_coefficients)) == 2
@@ -120,7 +123,23 @@ class BlockPrepareHouseholderStateQROAM(GateWithRegisters):
         )
 
     @property
-    def state_prep(self) -> BlockStatePreparationViaQROAMRotations:
+    def state_prep(self) -> Bloq:
+        if self.three_phase_layer_prep:
+            # Drop-in replacement: block-diagonal "three diagonal phase layers + Hadamards"
+            # ansatz (arXiv:2409.11748 p.14).  The all-diagonal-phase ansatz has no amplitude
+            # staircase, so it is given its OWN blocking regime keyed off ``optimal_T``: the
+            # QROAM-auto-optimal split (None) for the T-optimal point, or un-batched lambda=1
+            # ((0,0)) for the minimal-qubit point -- a fair like-for-like comparison.
+            lbs = None if self.optimal_T else (0, 0)
+            return ThreePhaseLayerStatePreparation.from_bitsize(
+                n_coeff=self.n_rows,
+                phase_bitsize=self.phase_bitsize,
+                n_blocks=self.n_blocks,
+                control_bitsize=1,
+                uncompute=self.uncompute,
+                log_block_sizes=lbs,
+                adjoint_log_block_sizes=lbs,
+            )
         return BlockStatePreparationViaQROAMRotations(
             state_coefficients=self.state_coefficients,
             phase_bitsize=self.phase_bitsize,
@@ -249,6 +268,7 @@ class BlockHouseholderReflectionQROAM(GateWithRegisters):
         default=(0, 0), converter=_to_tuple_or_none
     )
     optimal_T: bool = False
+    three_phase_layer_prep: bool = False
 
     @property
     def n_blocks(self) -> SymbolicInt:
@@ -286,6 +306,7 @@ class BlockHouseholderReflectionQROAM(GateWithRegisters):
             phase_log_block_sizes=self.phase_log_block_sizes,
             phase_adjoint_log_block_sizes=self.phase_adjoint_log_block_sizes,
             optimal_T=self.optimal_T,
+            three_phase_layer_prep=self.three_phase_layer_prep,
         )
 
     def _reflect_around_zero(
@@ -441,6 +462,7 @@ class BlockUnitaryReflectionQROAM(GateWithRegisters):
     )
     optimal_T: bool = False
     transpose: bool = False
+    three_phase_layer_prep: bool = False
 
     def __attrs_post_init__(self):
         assert len(shape(self.block_unitaries)) == 3
@@ -483,6 +505,7 @@ class BlockUnitaryReflectionQROAM(GateWithRegisters):
         phase_adjoint_log_block_sizes: Optional[Union[SymbolicInt, Iterable[SymbolicInt]]] = (0, 0),
         optimal_T: bool = False,
         transpose: bool = False,
+        three_phase_layer_prep: bool = False,
     ) -> "BlockUnitaryReflectionQROAM":
         # ``n_reflections`` is the number of synthesized vectors -- columns of U when
         # ``transpose=False``, rows of U (columns of U^dagger) when ``transpose=True``.
@@ -496,6 +519,7 @@ class BlockUnitaryReflectionQROAM(GateWithRegisters):
             phase_adjoint_log_block_sizes=phase_adjoint_log_block_sizes,
             optimal_T=optimal_T,
             transpose=transpose,
+            three_phase_layer_prep=three_phase_layer_prep,
         )
 
     @property
@@ -542,6 +566,7 @@ class BlockUnitaryReflectionQROAM(GateWithRegisters):
             phase_log_block_sizes=self.phase_log_block_sizes,
             phase_adjoint_log_block_sizes=self.phase_adjoint_log_block_sizes,
             optimal_T=self.optimal_T,
+            three_phase_layer_prep=self.three_phase_layer_prep,
         )
 
     def build_composite_bloq(self, bb: BloqBuilder, **soqs: SoquetT) -> Dict[str, SoquetT]:

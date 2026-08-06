@@ -5,7 +5,8 @@ For each block A_k (size 2^n x 2^n) with SVD A_k = U_k Sigma_k V_k:
   1. Apply  sum_k |k><k| (x) V_k          via BlockUnitaryInterferometerSynthesisQROAM.
   2. Apply  sum_k |k><k| (x) Sigma_k      on a single block-encoding ancilla,
      loading angles theta_{k,i} = arccos(sigma_{k,i}) by QROAMClean, executing one
-     controlled AddIntoPhaseGrad (Hadamard-sandwiched for an Ry on the ancilla),
+     controlled AddIntoPhaseGrad (Hadamard-sandwiched for an Ry on the ancilla)
+     followed by a Z gate so the rotation becomes a reflection (Z . Ry(2 theta)),
      and uncomputing via QROAMCleanAdjoint.
   3. Apply  sum_k |k><k| (x) U_k          via BlockUnitaryInterferometerSynthesisQROAM.
 
@@ -37,7 +38,7 @@ import attrs
 import numpy as np
 
 from qualtran import Bloq, BloqBuilder, CtrlSpec, QAny, QBit, QUInt, Register, Signature, SoquetT
-from qualtran.bloqs.basic_gates import Hadamard
+from qualtran.bloqs.basic_gates import Hadamard, ZGate
 from qualtran.bloqs.block_encoding import BlockEncoding
 from qualtran.bloqs.block_encoding.lcu_block_encoding import PrepareIdentity
 from qualtran.bloqs.data_loading.qroam_clean import QROAMClean, QROAMCleanAdjoint
@@ -75,11 +76,12 @@ class SVDBlockEncodingInterferometer(BlockEncoding):
     Each $A_k$ (size $2^n \times 2^n$, $\lVert A_k \rVert \le 1$) is decomposed as
     $A_k = U_k \Sigma_k V_k$.  The block encoding is
 
-    .. math:: B = (I_a \otimes U)(R_y \otimes I_s)(I_a \otimes V),
+    .. math:: B = (I_a \otimes U)(Z R_y \otimes I_s)(I_a \otimes V),
 
     where the singular-value rotation $R_y$ acts on a single block-encoding ancilla
     controlled on the (block, system) index, loading $\theta_{k,i}$ via QROAMClean and
-    uncomputing it via QROAMCleanAdjoint.
+    uncomputing it via QROAMCleanAdjoint.  A $Z$ gate after $R_y$ turns the rotation into
+    a reflection ($Z R_y(2\theta)$) on the ancilla.
 
     This bloq exposes the standard ``qualtran.bloqs.block_encoding.BlockEncoding``
     interface (system/ancilla/resource registers; alpha, epsilon; signal_state) so it
@@ -263,6 +265,7 @@ class SVDBlockEncodingInterferometer(BlockEncoding):
         ret[self.interferometer] += 2                # U_k and V_k
         ret[self.diag_qroam] += 1                    # load angles theta_{k,i}
         ret[self.ctrl_phase_grad_add] += 1           # Ry(2 theta) on BE ancilla
+        ret[ZGate()] += 1                            # Z after Ry -> reflection on BE ancilla
         ret[self.diag_qroam_adjoint] += 1            # uncompute angle register
         return ret
 
@@ -342,12 +345,14 @@ class SVDBlockEncodingInterferometer(BlockEncoding):
             matrix = q_out[sel_names[0]]
         phi = q_out['target0_']
 
-        # Ry(2*theta) on BE ancilla via Hadamard sandwich + controlled phase-grad add.
+        # Ry(2*theta) on BE ancilla via Hadamard sandwich + controlled phase-grad add,
+        # followed by a Z to turn the rotation into a reflection (Z . Ry(2 theta)).
         be_anc = bb.add(Hadamard(), q=be_anc)
         be_anc, phi, phase_grad = bb.add(
             self.ctrl_phase_grad_add, ctrl=be_anc, x=phi, phase_grad=phase_grad
         )
         be_anc = bb.add(Hadamard(), q=be_anc)
+        be_anc = bb.add(ZGate(), q=be_anc)
 
         # QROAM uncompute (measurement-based; 0 Toffoli for the intermediate-style adjoint).
         # Reshape forward's (target + junk) into the adjoint's expected target shape,
@@ -442,5 +447,6 @@ class _ControlledSVDBlockEncodingInterferometer(BlockEncoding):
         ret[_ControlledBlockUnitaryInterferometerSynthesisQROAM(self.inner.interferometer)] += 2
         ret[self.inner.diag_qroam] += 1
         ret[AddIntoPhaseGrad(b, b).controlled().controlled()] += 1  # cc-Ry on BE ancilla
+        ret[ZGate().controlled()] += 1  # ctrl-Z reflection (identity when ctrl = 0)
         ret[self.inner.diag_qroam_adjoint] += 1
         return ret

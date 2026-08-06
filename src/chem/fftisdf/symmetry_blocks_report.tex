@@ -1,0 +1,134 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{parskip}
+\usepackage{booktabs}
+\usepackage{enumitem}
+\usepackage[colorlinks=true,linkcolor=blue,urlcolor=blue]{hyperref}
+
+\title{\vspace{-1.2cm}How the symmetry-adapted blocks are related,\\[2pt]
+\large and how much unique information they carry}
+\author{}
+\date{\today}
+
+\begin{document}
+\maketitle
+\vspace{-0.9cm}
+
+\section*{What this note is about}
+
+This summarizes how the pieces of the space-group change-of-basis $Q$ (the transform taking the
+ISDF grid index $(k,I)$ to symmetry-adapted labels $(i,a,c)$) are related to one another, and how
+little \emph{genuinely independent} information $Q$ contains. The running example is diamond
+($n_{\mathrm{IP}}=136$ interpolation points per cell, $48$ point-group operations), on $2\times2\times2$
+and $6\times6\times6$ $k$-meshes. Everything below is nonsymmorphic-safe: the lattice-vector /
+fractional-translation phases are carried explicitly, and at Brillouin-zone boundaries the
+little-group representations are the projective ones.
+
+\section{Block structure of $Q$}
+
+$Q$ is a square unitary of size $N=n_k\,n_{\mathrm{IP}}$. Two structural facts:
+
+\begin{enumerate}[nosep]
+  \item \textbf{Block-diagonal in $k$.} Each symmetry-adapted vector has a definite momentum, so
+        $Q=\bigoplus_k Q^{(k)}$ with $n_k$ blocks, each $n_{\mathrm{IP}}\times n_{\mathrm{IP}}$.
+        $Q$ never mixes different momenta.
+  \item \textbf{Grouped into families (stars).} The point-group operations permute the $k$-points
+        into \emph{families}; within a family the members are carried into one another by
+        ``move-it'' operations. Only \textbf{one block per family} is independent.
+\end{enumerate}
+
+Within a representative block $Q^{(k_0)}$, the transform is a direct sum of small little-group
+``pattern'' blocks, one per interpolation-point orbit (size $\le |L_k|\le 48$).
+
+\section{How the blocks of a family are related}
+
+Fix a family with representative momentum $k_0$ and another member $k_j=g_j\cdot k_0$, where $g_j$ is
+a chosen move-it operation. For any symmetry-adapted column $c$, the entries of the two blocks are
+related \textbf{entry-by-entry} by
+
+\[
+  \boxed{\;Q^{(k_j)}_{\,\mathrm{perm}[g_j,I],\ c}
+     \;=\; e^{-\,i\,k_j\cdot L_I(g_j)}\;\,Q^{(k_0)}_{\,I,\ c}\;}
+\]
+
+i.e.\ as matrices $\;Q^{(k_j)} = P(g_j)\,\Lambda(g_j,k_j)\,Q^{(k_0)}\;$, where $P(g_j)$ permutes the
+interpolation-point rows by $\mathrm{perm}[g_j,\cdot]$ and $\Lambda$ is the diagonal Bloch phase
+$e^{-i\,k_j\cdot L_I(g_j)}$. Reading it off, across a family and for the same column $c$:
+
+\begin{itemize}[nosep]
+  \item \textbf{rows are permuted}: $I\mapsto \mathrm{perm}[g_j,I]$ (the grid shuffle of $g_j$);
+  \item \textbf{each entry gets a phase} $e^{-i\,k_j\cdot L_I(g_j)}$ --- the only $k$-dependence;
+  \item \textbf{magnitudes are unchanged}: $|Q^{(k_j)}_{\mathrm{perm}[g_j,I],c}|=|Q^{(k_0)}_{I,c}|$;
+  \item \textbf{the pattern label $c$ is preserved} (same irrep, same little-group partner, same
+        copy); only the star-member advances $k_0\to k_j$.
+\end{itemize}
+
+Here $L_I(g)$ is the \textbf{fold-back lattice vector}, defined by
+$g\cdot r_I = r_{\mathrm{perm}[g,I]} + L_I(g)$ (for nonsymmorphic $g=\{R\mid\tau\}$ the fractional
+translation $\tau$ is included in $g\cdot r_I$). It depends only on $(g,I)$, \emph{not} on $k$; the
+$k$-dependence is entirely the computable phase $e^{-ik\cdot L}$. Different families are independent
+(each keeps its own representative block).
+
+\section{Amount of unique information}
+
+Because every non-representative block is a phased-permutation \emph{image} of its family
+representative, the genuinely independent content of $Q$ is just the representative blocks:
+
+\[
+  \#\{\text{unique numbers}\}\;=\;\sum_{\text{family reps}}\ \sum_{\text{orbits }o}|o|^2 .
+\]
+
+The auxiliary objects $g_j$ (which operation reaches which member) and $L_I(g)$ are \textbf{not}
+per-family data: they are properties of the $48$ operations and the grid geometry, shared across all
+families and all $k$. In fact they follow from a tiny, $k$-independent \textbf{generation kernel}:
+
+\[
+  \underbrace{n_{\mathrm{IP}}\times 3}_{\text{point positions}}
+  \;+\;\underbrace{48\times(9+3)}_{\text{ops }(R,\tau)}
+  \;\approx\; 1000\ \text{numbers},
+\]
+
+from which $\mathrm{perm}$, $L$, all phases, and the $k$-map are computed. Per family one records
+\emph{only} its representative block.
+
+\subsection*{The numbers, and how they scale}
+
+\begin{center}
+\begin{tabular}{lrrr}
+\toprule
+ & $2\times2\times2$ & $6\times6\times6$ & growth \\
+\midrule
+$n_k$ (momenta) & $8$ & $216$ & $27\times$ \\
+families (stars) & $3$ & $16$ & $5.3\times$ \\
+\textbf{unique data of $Q$} $\big(\sum|o|^2\big)$ & $\mathbf{6{,}800}$ & $\mathbf{12{,}912}$ & $\mathbf{1.9\times}$ \\
+block-diagonal-in-$k$ \ $n_k\,n_{\mathrm{IP}}^2$ & $147{,}968$ & $3{,}995{,}136$ & $27\times\ (\propto n_k)$ \\
+dense \ $(n_k\,n_{\mathrm{IP}})^2$ & $1{,}183{,}744$ & $862{,}949{,}376$ & $729\times\ (\propto n_k^2)$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\textbf{Key point.} From $2\times2\times2$ to $6\times6\times6$ the number of momenta grows $27\times$,
+but the genuine unique data grows only $\approx 1.9\times$. It tracks the number of \emph{families},
+not $n_k$ --- and even that sublinearly, because the many new $k$-points are low-symmetry (little
+groups of size $2$ or $4$), whose small little groups split the $136$ points into many tiny orbits
+that contribute almost nothing to $\sum|o|^2$ (the bulk is still the few high-symmetry families, e.g.\
+$\Gamma$ alone gives $3872$). For $6\times6\times6$ the unique data ($12{,}912$) is about
+$67{,}000\times$ smaller than the dense matrix ($8.6\times10^8$).
+
+\section*{Summary}
+
+\begin{itemize}[nosep]
+  \item $Q$ is block-diagonal in $k$; its blocks come in \textbf{families}, and only one block per
+        family is independent.
+  \item Within a family, member blocks are \textbf{phased-permutation images} of the representative:
+        same magnitudes, rows permuted by $g_j$, times a member-specific Bloch phase
+        $e^{-ik_j\cdot L}$; the pattern label is preserved.
+  \item The unique information is $\sum_{\text{families}}\sum_{\text{orbits}}|o|^2$
+        ($6{,}800$ for $2\times2\times2$, $12{,}912$ for $6\times6\times6$), plus a
+        $\sim\!1000$-number, $k$-independent generation kernel. The $k$-dependence lives only in
+        computable phases, so the information is \textbf{essentially flat in $n_k$} --- it scales with
+        the number of families, not the number of $k$-points.
+\end{itemize}
+
+\end{document}

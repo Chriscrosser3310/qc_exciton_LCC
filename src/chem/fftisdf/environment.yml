@@ -1,0 +1,13 @@
+name: fftisdf
+dependencies:
+  - python=3.10
+  - blas=*=mkl       
+  - mkl 
+  - numpy
+  - scipy
+  - h5py::conda-forge
+  - hdf5::conda-forge
+  - pip
+  - pip:
+    - pyscf
+

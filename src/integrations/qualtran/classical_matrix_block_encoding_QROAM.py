@@ -87,9 +87,11 @@ from qualtran.symbolics import bit_length, HasLength, is_symbolic, Shaped, Symbo
 try:
     from .block_state_preparation_QROAM import BlockStatePreparationViaQROAMRotations
     from .state_prep_QROAM import StatePreparationViaQROAMRotations
+    from .three_phase_layer_state_prep_QROAM import ThreePhaseLayerStatePreparation
 except ImportError:  # pragma: no cover - script / notebook execution
     from block_state_preparation_QROAM import BlockStatePreparationViaQROAMRotations
     from state_prep_QROAM import StatePreparationViaQROAMRotations
+    from three_phase_layer_state_prep_QROAM import ThreePhaseLayerStatePreparation
 
 if TYPE_CHECKING:
     from qualtran import AddControlledT
@@ -210,6 +212,7 @@ class ClassicalMatrixBlockEncoding(BlockEncoding):
     phi_col: Union[HasLength, Tuple[complex, ...]] = attrs.field(eq=False)
     alpha_val: SymbolicFloat
     optimal_T: bool = True
+    three_phase_layer_prep: bool = False
 
     @psi_rows.validator
     def _check_psi(self, attribute, value):
@@ -220,7 +223,12 @@ class ClassicalMatrixBlockEncoding(BlockEncoding):
 
     @classmethod
     def from_matrix(
-        cls, A: NDArray[np.floating], phase_bitsize: SymbolicInt, *, optimal_T: bool = True
+        cls,
+        A: NDArray[np.floating],
+        phase_bitsize: SymbolicInt,
+        *,
+        optimal_T: bool = True,
+        three_phase_layer_prep: bool = False,
     ) -> "ClassicalMatrixBlockEncoding":
         """Data-bearing block-encoding of a concrete (real or complex) matrix ``A``.
 
@@ -238,6 +246,7 @@ class ClassicalMatrixBlockEncoding(BlockEncoding):
             phi_col=phi,
             alpha_val=alpha,
             optimal_T=optimal_T,
+            three_phase_layer_prep=three_phase_layer_prep,
         )
 
     @classmethod
@@ -248,6 +257,7 @@ class ClassicalMatrixBlockEncoding(BlockEncoding):
         *,
         alpha: Optional[SymbolicFloat] = None,
         optimal_T: bool = True,
+        three_phase_layer_prep: bool = False,
     ) -> "ClassicalMatrixBlockEncoding":
         """Data-free block-encoding for resource estimation from sizes alone.
 
@@ -257,6 +267,9 @@ class ClassicalMatrixBlockEncoding(BlockEncoding):
         ``optimal_T`` selects the QROAM block-size regime: ``True`` (default) targets the
         analytic ``lambda*`` minimal-T-count point of the paper; ``False`` uses un-batched
         (``lambda = 1``) QROAM for the minimal-qubit point.
+
+        ``three_phase_layer_prep`` replaces both state preparations with the "three diagonal
+        phase layers + Hadamards" ansatz (arXiv:2409.11748 p.14).
         """
         if not is_symbolic(n_rows) and n_rows != 2 ** bit_length(n_rows - 1):
             raise ValueError("n_rows must be a power of two")
@@ -269,6 +282,7 @@ class ClassicalMatrixBlockEncoding(BlockEncoding):
             phi_col=HasLength(n_rows),
             alpha_val=alpha,
             optimal_T=optimal_T,
+            three_phase_layer_prep=three_phase_layer_prep,
         )
 
     # ----------------------------- Shape helpers --------------------------------
@@ -319,14 +333,30 @@ class ClassicalMatrixBlockEncoding(BlockEncoding):
 
     # --------------------------- Sub-bloq factories -----------------------------
 
-    def _prep_psi_fwd(self, control_bitsize: int = 0) -> BlockStatePreparationViaQROAMRotations:
+    def _prep_psi_fwd(self, control_bitsize: int = 0) -> Bloq:
         """``U_R``: FORWARD controlled state preparation of the column states ``|psi_l>``.
 
         Running this (the dominant ``N x N`` block prep) forward lets every per-layer QROAM
         unload be a 0-Toffoli X-measurement (``measure_reset``).  T-opt -> Toffoli-minimal
         select-swap batch from :func:`_min_T_block_prep_lbs`; minimal-qubit -> ``(0, 0)``
         un-batched ``lambda = 1`` QROAM.
+
+        With ``three_phase_layer_prep`` the ``N`` column states are prepared by the
+        block-diagonal three-phase-layer ansatz (``n_blocks = N`` index addresses), in its
+        own ``optimal_T`` blocking regime (auto-optimal split, or ``lambda = 1``).
         """
+        if self.three_phase_layer_prep:
+            lbs = None if self.optimal_T else (0, 0)
+            return ThreePhaseLayerStatePreparation.from_bitsize(
+                n_coeff=self.n_rows,
+                phase_bitsize=self.phase_bitsize,
+                n_blocks=self.n_rows,
+                control_bitsize=control_bitsize,
+                uncompute=False,
+                measure_reset=True,
+                log_block_sizes=lbs,
+                adjoint_log_block_sizes=lbs,
+            )
         if self.optimal_T:
             lbs = (
                 None
@@ -350,12 +380,26 @@ class ClassicalMatrixBlockEncoding(BlockEncoding):
             measure_reset=True,
         )
 
-    def _prep_phi_adj(self, control_bitsize: int = 0) -> StatePreparationViaQROAMRotations:
+    def _prep_phi_adj(self, control_bitsize: int = 0) -> Bloq:
         """``U_L^\\dagger``: ADJOINT plain state preparation of the column-norm state ``|phi>``.
 
         The cheap 1-D prep; kept as a full coherent adjoint (no measurement shortcut).
         ``optimal_T`` -> QROAMClean's own T-optimal block size; minimal-qubit -> ``(0,)``.
+
+        With ``three_phase_layer_prep`` the (single, non-block) state is prepared by the
+        three-phase-layer ansatz run in uncompute mode.
         """
+        if self.three_phase_layer_prep:
+            lbs = None if self.optimal_T else (0,)
+            return ThreePhaseLayerStatePreparation.from_bitsize(
+                n_coeff=self.n_rows,
+                phase_bitsize=self.phase_bitsize,
+                n_blocks=1,
+                control_bitsize=control_bitsize,
+                uncompute=True,
+                log_block_sizes=lbs,
+                adjoint_log_block_sizes=lbs,
+            )
         lbs = None if self.optimal_T else (0,)
         return StatePreparationViaQROAMRotations(
             state_coefficients=self.phi_col,
@@ -627,12 +671,18 @@ class BlockDiagonalClassicalMatrixBlockEncoding(BlockEncoding):
     psi_rows: Union[Shaped, NDArray[np.complex128]] = attrs.field(eq=False)
     alpha_val: SymbolicFloat
     optimal_T: bool = True
+    three_phase_layer_prep: bool = False
 
     # ------------------------------- Constructors -------------------------------
 
     @classmethod
     def from_matrices(
-        cls, mats, phase_bitsize: SymbolicInt, *, optimal_T: bool = True
+        cls,
+        mats,
+        phase_bitsize: SymbolicInt,
+        *,
+        optimal_T: bool = True,
+        three_phase_layer_prep: bool = False,
     ) -> "BlockDiagonalClassicalMatrixBlockEncoding":
         """Data-bearing block-encoding of a list of concrete blocks ``A_k``.
 
@@ -653,6 +703,7 @@ class BlockDiagonalClassicalMatrixBlockEncoding(BlockEncoding):
             psi_rows=psi,
             alpha_val=alpha,
             optimal_T=optimal_T,
+            three_phase_layer_prep=three_phase_layer_prep,
         )
 
     @classmethod
@@ -664,11 +715,15 @@ class BlockDiagonalClassicalMatrixBlockEncoding(BlockEncoding):
         *,
         alpha: Optional[SymbolicFloat] = None,
         optimal_T: bool = True,
+        three_phase_layer_prep: bool = False,
     ) -> "BlockDiagonalClassicalMatrixBlockEncoding":
         """Data-free block-encoding for resource estimation from sizes alone.
 
         ``n_rows`` must be a power of two; ``n_blocks`` is the (power-of-two) number of
         blocks ``K``.  The returned bloq supports call-graph / resource estimates.
+
+        ``three_phase_layer_prep`` replaces every state preparation (flag, ``U_R``,
+        ``U_L^dag``) with the "three diagonal phase layers + Hadamards" ansatz.
         """
         if not is_symbolic(n_rows) and n_rows != 2 ** bit_length(n_rows - 1):
             raise ValueError("n_rows must be a power of two")
@@ -684,6 +739,7 @@ class BlockDiagonalClassicalMatrixBlockEncoding(BlockEncoding):
             psi_rows=Shaped((nb_x_nr, n_rows)),
             alpha_val=alpha,
             optimal_T=optimal_T,
+            three_phase_layer_prep=three_phase_layer_prep,
         )
 
     # ----------------------------- Shape helpers --------------------------------
@@ -751,7 +807,22 @@ class BlockDiagonalClassicalMatrixBlockEncoding(BlockEncoding):
     def _block_prep(
         self, coeffs, n_blocks: SymbolicInt, n_coeff: SymbolicInt, uncompute: bool,
         control_bitsize: int,
-    ) -> BlockStatePreparationViaQROAMRotations:
+    ) -> Bloq:
+        if self.three_phase_layer_prep:
+            # All three preps (flag, U_R, U_L^dag) route through here, so this single branch
+            # swaps every state preparation for the block-diagonal three-phase-layer ansatz in
+            # its own optimal_T regime (auto-optimal split, or lambda=1).
+            lbs = None if self.optimal_T else (0, 0)
+            return ThreePhaseLayerStatePreparation.from_bitsize(
+                n_coeff=n_coeff,
+                phase_bitsize=self.phase_bitsize,
+                n_blocks=n_blocks,
+                control_bitsize=control_bitsize,
+                uncompute=uncompute,
+                measure_reset=True,
+                log_block_sizes=lbs,
+                adjoint_log_block_sizes=lbs,
+            )
         lbs = self._lbs_for(n_blocks, n_coeff, uncompute)
         return BlockStatePreparationViaQROAMRotations(
             state_coefficients=coeffs,
@@ -766,11 +837,11 @@ class BlockDiagonalClassicalMatrixBlockEncoding(BlockEncoding):
             measure_reset=True,  # forward layers erase by X-measurement; gated off for adjoints
         )
 
-    def _prep_flag(self, control_bitsize: int = 0) -> BlockStatePreparationViaQROAMRotations:
+    def _prep_flag(self, control_bitsize: int = 0) -> Bloq:
         """``k``-controlled 1-qubit flag rotation ``|0>_f -> (F_k/F_max)|0> + (.)|1>`` (forward)."""
         return self._block_prep(self.flag_coeffs, self.n_blocks, 2, False, control_bitsize)
 
-    def _prep_psi_fwd(self, control_bitsize: int = 0) -> BlockStatePreparationViaQROAMRotations:
+    def _prep_psi_fwd(self, control_bitsize: int = 0) -> Bloq:
         """``U_R``: ``(k, l)``-controlled FORWARD state prep of the column states ``|psi_{k,l}>``.
 
         The dominant ``K*N x N`` block prep; running it forward makes every per-layer QROAM
@@ -780,7 +851,7 @@ class BlockDiagonalClassicalMatrixBlockEncoding(BlockEncoding):
             self.psi_rows, self.n_blocks * self.n_rows, self.n_rows, False, control_bitsize
         )
 
-    def _prep_phi_adj(self, control_bitsize: int = 0) -> BlockStatePreparationViaQROAMRotations:
+    def _prep_phi_adj(self, control_bitsize: int = 0) -> Bloq:
         """``U_L^dag``: ``k``-controlled ADJOINT state prep of ``|phi_k>`` (kept coherent)."""
         return self._block_prep(self.phi_col, self.n_blocks, self.n_rows, True, control_bitsize)
 
@@ -1009,3 +1080,335 @@ class _ControlledBlockDiagonalClassicalMatrixBlockEncoding(BlockEncoding):
             np.concatenate([bb.split(r1), [flag]]), dtype=QAny(inner.ancilla_bitsize)
         )
         return {'ctrl': ctrl, 'system': system, 'ancilla': ancilla, 'resource': pg}
+
+
+# =============================================================================
+# Off-diagonal Hermitian block-encoding via the off-diagonal dilation
+#   S = |0><1| (x) U + |1><0| (x) U^dag = [[0, U], [U^dag, 0]]   (Clader et al. App. A 1)
+# =============================================================================
+
+
+@attrs.frozen
+class HermitianOffDiagonalBlockEncoding(BlockEncoding):
+    r"""``(alpha, a, eps)`` block-encoding of the Hermitian dilation ``Abar = [[0, A],[A^dag, 0]]``.
+
+    From ANY inner block-encoding ``U`` of ``A`` (``P U P = A/alpha``, ``P = |0^a><0^a| (x) I``),
+    the off-diagonal "qubitization" dilation
+
+    .. math::
+        S = |0><1| (x) U + |1><0| (x) U^\dagger = \begin{pmatrix} 0 & U \\ U^\dagger & 0 \end{pmatrix}
+
+    block-encodes ``Abar = [[0, A],[A^dag, 0]]`` at the SAME ``alpha``, projecting only the
+    inner ancilla:
+
+    .. math::
+        (I_e (x) \langle 0^a| (x) I)\, S\, (I_e (x) |0^a> (x) I)
+        = \tfrac{1}{alpha}\begin{pmatrix} 0 & A \\ A^\dagger & 0 \end{pmatrix}.
+
+    The extra qubit ``e`` indexes the two off-diagonal blocks and is part of the *encoded
+    system* (no new block-encoding ancilla is needed).  ``Abar`` is Hermitian and ``S`` is
+    itself Hermitian and unitary (``S^2 = I``).  This works for ANY ``A`` (Hermitian or not;
+    non-square ``A`` is square-padded by the inner encoding).
+
+    Cost: ``C[U] + C[U^dag]`` (identical resources) + one ``X`` -- about ``2x`` the inner
+    Toffoli count and only the inner's ancilla.  This is roughly HALF the cost of building a
+    fresh controlled state preparation over the doubled space (the literal ``P^dag SWAP P``
+    route): it reuses the efficient inner block-encoding twice instead.
+
+    Registers:
+      * ``system``   -- 1 off-diagonal-index qubit + the inner system register.
+      * ``ancilla``  -- the inner ancilla (signal ``|0^a>``; the extra qubit is NOT projected).
+      * ``resource`` -- the inner resource register.
+
+    Note: ``U^dag`` is charged as a second ``C[U]`` (identical Clifford+T cost; the inner
+    adjoint is not separately buildable here owing to a ``QROAMClean.adjoint`` shape limit).
+    """
+
+    inner: BlockEncoding
+
+    # ------------------------------- Constructors -------------------------------
+
+    @classmethod
+    def from_inner(cls, inner: BlockEncoding) -> "HermitianOffDiagonalBlockEncoding":
+        """Wrap any block-encoding ``U`` of ``A`` into a block-encoding of ``[[0,A],[A^dag,0]]``."""
+        return cls(inner=inner)
+
+    @classmethod
+    def from_matrix(
+        cls, A: NDArray[np.floating], phase_bitsize: SymbolicInt, *, optimal_T: bool = True
+    ) -> "HermitianOffDiagonalBlockEncoding":
+        """Data-bearing Hermitian dilation of ``A`` (inner = dense Clader block-encoding)."""
+        return cls(inner=ClassicalMatrixBlockEncoding.from_matrix(A, phase_bitsize, optimal_T=optimal_T))
+
+    @classmethod
+    def from_bitsize(
+        cls,
+        n_rows: SymbolicInt,
+        n_cols: SymbolicInt,
+        phase_bitsize: SymbolicInt,
+        *,
+        alpha: Optional[SymbolicFloat] = None,
+        optimal_T: bool = True,
+    ) -> "HermitianOffDiagonalBlockEncoding":
+        """Data-free Hermitian dilation for resource estimates.
+
+        ``A`` is square-padded to ``N = max(n_rows, n_cols)`` (a power of two) by the inner
+        dense block-encoding; the dilation then acts on ``2N`` dimensions.
+        """
+        if is_symbolic(n_rows, n_cols):
+            N = n_rows
+        else:
+            N = max(int(n_rows), int(n_cols))
+        inner = ClassicalMatrixBlockEncoding.from_bitsize(N, phase_bitsize, alpha=alpha, optimal_T=optimal_T)
+        return cls(inner=inner)
+
+    # ------------------------- BlockEncoding interface --------------------------
+
+    @cached_property
+    def system_bitsize(self) -> SymbolicInt:
+        return self.inner.system_bitsize + 1  # + off-diagonal index qubit e
+
+    @cached_property
+    def ancilla_bitsize(self) -> SymbolicInt:
+        return self.inner.ancilla_bitsize     # e lives in the system, not the ancilla
+
+    @cached_property
+    def resource_bitsize(self) -> SymbolicInt:
+        return self.inner.resource_bitsize
+
+    @property
+    def alpha(self) -> SymbolicFloat:
+        return self.inner.alpha
+
+    @property
+    def epsilon(self) -> SymbolicFloat:
+        return self.inner.epsilon
+
+    @cached_property
+    def signal_state(self) -> PrepareOracle:
+        return PrepareIdentity.from_bitsizes((self.ancilla_bitsize,))
+
+    @cached_property
+    def signature(self) -> Signature:
+        return Signature([
+            Register('system', QAny(self.system_bitsize)),
+            Register('ancilla', QAny(self.ancilla_bitsize)),
+            Register('resource', QAny(self.resource_bitsize)),
+        ])
+
+    @property
+    def ctrl_inner(self) -> Bloq:
+        """``C[U]`` -- the singly-controlled inner block-encoding (used for both halves of S)."""
+        return self.inner.controlled()
+
+    def build_call_graph(self, ssa: "SympySymbolAllocator") -> "BloqCountDictT":
+        from qualtran.bloqs.basic_gates import XGate
+
+        ret: "Counter[Bloq]" = Counter()
+        ret[XGate()] += 1                # the X (x) I factor of S (flips the index qubit)
+        ret[self.ctrl_inner] += 2        # C[U] and C[U^dagger] (identical resources)
+        return ret
+
+    def get_ctrl_system(self, ctrl_spec: "CtrlSpec") -> "Tuple[Bloq, AddControlledT]":
+        return get_ctrl_system_1bit_cv_from_bloqs(
+            self, ctrl_spec, current_ctrl_bit=None,
+            bloq_with_ctrl=_ControlledHermitianOffDiagonalBlockEncoding(self),
+            ctrl_reg_name='ctrl',
+        )
+
+
+@attrs.frozen
+class _ControlledHermitianOffDiagonalBlockEncoding(BlockEncoding):
+    """Singly-controlled :class:`HermitianOffDiagonalBlockEncoding`.
+
+    Controlling ``S = X (x) I . C[U] . C[U^dag]`` fuses the extra control into each half
+    (one ``And`` per half) and turns the index flip into a CNOT; the two ``C[U]`` calls are
+    otherwise unchanged.
+    """
+
+    be: "HermitianOffDiagonalBlockEncoding"
+
+    @cached_property
+    def system_bitsize(self) -> SymbolicInt:
+        return self.be.system_bitsize
+
+    @cached_property
+    def ancilla_bitsize(self) -> SymbolicInt:
+        return self.be.ancilla_bitsize
+
+    @cached_property
+    def resource_bitsize(self) -> SymbolicInt:
+        return self.be.resource_bitsize
+
+    @property
+    def alpha(self) -> SymbolicFloat:
+        return self.be.alpha
+
+    @property
+    def epsilon(self) -> SymbolicFloat:
+        return self.be.epsilon
+
+    @cached_property
+    def signal_state(self) -> PrepareOracle:
+        return self.be.signal_state
+
+    @cached_property
+    def signature(self) -> Signature:
+        return Signature([Register('ctrl', QBit()), *self.be.signature])
+
+    def build_call_graph(self, ssa: "SympySymbolAllocator") -> "BloqCountDictT":
+        from qualtran.bloqs.basic_gates import XGate
+        from qualtran.bloqs.mcmt.and_bloq import And
+
+        ret: "Counter[Bloq]" = Counter()
+        ret[self.be.ctrl_inner] += 2     # C[U], C[U^dag] (each now doubly-controlled...)
+        ret[And()] += 2                  # ...via one And fusing the extra control per half
+        ret[XGate().controlled()] += 1   # controlled index flip (CNOT)
+        return ret
+
+
+# =============================================================================
+# Direct Hermitian-unitary block-encoding:  W = (H (x) I) S (H (x) I),
+#   S = [[0, U], [U^dag, 0]]  (Hermitian + unitary, W^2 = I)
+# =============================================================================
+
+
+@attrs.frozen
+class DirectHermitianBlockEncoding(BlockEncoding):
+    r"""Hermitian *unitary* block-encoding of a Hermitian ``A`` from any block-encoding ``U``.
+
+    Given an inner block-encoding ``U`` with ``P U P = A/alpha`` (``P = |0^a><0^a| (x) I``)
+    of a Hermitian matrix ``A = A^dag``, ``U`` itself need not satisfy ``U = U^dag``.  Adding
+    one ancilla qubit and defining
+
+    .. math::
+        S = |0><1| (x) U + |1><0| (x) U^\dagger = \begin{pmatrix} 0 & U \\ U^\dagger & 0 \end{pmatrix},
+        \qquad W = (H (x) I)\, S \,(H (x) I),
+
+    yields ``W = W^dag`` and ``W^2 = I`` (a Hermitian unitary / involution), with
+
+    .. math::
+        (\langle 0| (x) P)\, W \,(|0> (x) P) = \tfrac12 P(U + U^\dagger)P = \tfrac{A}{alpha}
+
+    when ``A = A^dag``.  (For a general inner matrix ``A`` it block-encodes the Hermitian
+    part ``(A + A^dag)/2``.)  This is the standard "make the walk operator Hermitian" trick
+    and is distinct from the off-diagonal construction (:class:`HermitianOffDiagonalBlockEncoding`,
+    App. A 1), which instead makes the encoded *matrix* Hermitian by doubling its dimension.
+
+    Cost: two controlled calls to the inner block-encoding (``C[U]`` and ``C[U^\dagger]``,
+    identical resources) + two Hadamards + one X on the extra ancilla.  So
+    ``Toffoli(W) ~ 2 * Toffoli(U)`` with a single extra qubit -- typically much cheaper than
+    the dimension-doubling off-diagonal construction.
+
+    Registers:
+      * ``system``   -- the inner system register (unchanged).
+      * ``ancilla``  -- 1 extra Hermitian-flag qubit + the inner ancilla (signal ``|0>``).
+      * ``resource`` -- the inner resource register.
+
+    Note: ``U^\dagger`` is charged as a second ``C[U]`` because the inner adjoint is not
+    separately buildable here (a ``QROAMClean.adjoint`` shape limitation), but its
+    Clifford+T cost is identical, so the resource estimate is exact.
+    """
+
+    inner: BlockEncoding
+
+    @cached_property
+    def system_bitsize(self) -> SymbolicInt:
+        return self.inner.system_bitsize
+
+    @cached_property
+    def ancilla_bitsize(self) -> SymbolicInt:
+        return self.inner.ancilla_bitsize + 1  # extra Hermitian-flag qubit
+
+    @cached_property
+    def resource_bitsize(self) -> SymbolicInt:
+        return self.inner.resource_bitsize
+
+    @property
+    def alpha(self) -> SymbolicFloat:
+        return self.inner.alpha
+
+    @property
+    def epsilon(self) -> SymbolicFloat:
+        return self.inner.epsilon
+
+    @cached_property
+    def signal_state(self) -> PrepareOracle:
+        return PrepareIdentity.from_bitsizes((self.ancilla_bitsize,))
+
+    @cached_property
+    def signature(self) -> Signature:
+        return Signature([
+            Register('system', QAny(self.system_bitsize)),
+            Register('ancilla', QAny(self.ancilla_bitsize)),
+            Register('resource', QAny(self.resource_bitsize)),
+        ])
+
+    @property
+    def ctrl_inner(self) -> Bloq:
+        """``C[U]`` -- the singly-controlled inner block-encoding (used for both halves)."""
+        return self.inner.controlled()
+
+    def build_call_graph(self, ssa: "SympySymbolAllocator") -> "BloqCountDictT":
+        from qualtran.bloqs.basic_gates import Hadamard, XGate
+
+        ret: "Counter[Bloq]" = Counter()
+        ret[Hadamard()] += 2                 # conjugating Hadamards on the extra ancilla
+        ret[XGate()] += 1                    # the X (x) I factor of S
+        ret[self.ctrl_inner] += 2            # C[U] and C[U^dagger] (identical resources)
+        return ret
+
+    def get_ctrl_system(self, ctrl_spec: "CtrlSpec") -> "Tuple[Bloq, AddControlledT]":
+        # C[W] = (H (x) I) C[S] (H (x) I): the conjugating Hadamards stay unconditional
+        # (they cancel when ctrl = 0), so controlling W reduces to controlling S.
+        return get_ctrl_system_1bit_cv_from_bloqs(
+            self, ctrl_spec, current_ctrl_bit=None,
+            bloq_with_ctrl=_ControlledDirectHermitianBlockEncoding(self),
+            ctrl_reg_name='ctrl',
+        )
+
+
+@attrs.frozen
+class _ControlledDirectHermitianBlockEncoding(BlockEncoding):
+    """Singly-controlled :class:`DirectHermitianBlockEncoding` (controls ``S``; H stays free)."""
+
+    be: "DirectHermitianBlockEncoding"
+
+    @cached_property
+    def system_bitsize(self) -> SymbolicInt:
+        return self.be.system_bitsize
+
+    @cached_property
+    def ancilla_bitsize(self) -> SymbolicInt:
+        return self.be.ancilla_bitsize
+
+    @cached_property
+    def resource_bitsize(self) -> SymbolicInt:
+        return self.be.resource_bitsize
+
+    @property
+    def alpha(self) -> SymbolicFloat:
+        return self.be.alpha
+
+    @property
+    def epsilon(self) -> SymbolicFloat:
+        return self.be.epsilon
+
+    @cached_property
+    def signal_state(self) -> PrepareOracle:
+        return self.be.signal_state
+
+    @cached_property
+    def signature(self) -> Signature:
+        return Signature([Register('ctrl', QBit()), *self.be.signature])
+
+    def build_call_graph(self, ssa: "SympySymbolAllocator") -> "BloqCountDictT":
+        from qualtran.bloqs.basic_gates import Hadamard, XGate
+        from qualtran.bloqs.mcmt.and_bloq import And
+
+        ret: "Counter[Bloq]" = Counter()
+        ret[Hadamard()] += 2             # unconditional conjugating Hadamards
+        ret[self.be.ctrl_inner] += 2     # C[U], C[U^dag] (each doubly-controlled...)
+        ret[And()] += 2                  # ...via one And fusing the extra control per half
+        ret[XGate().controlled()] += 1   # controlled index flip (CNOT)
+        return ret

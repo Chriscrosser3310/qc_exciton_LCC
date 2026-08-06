@@ -1,0 +1,103 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+.DS_Store
+*chk
+
+# C extensions
+*.so
+*.dylib
+
+# Distribution / packaging
+.Python
+env/
+bin/
+build/
+develop-eggs/
+dist/
+eggs/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Local log files
+*~
+
+# Calculation examples
+*.molden
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.coverage
+.cache
+nosetests.xml
+coverage.xml
+
+# Translations
+*.mo
+
+# Mr Developer
+.mr.developer.cfg
+.project
+.pydevproject
+
+# Rope
+.ropeproject
+
+# Django stuff:
+# *.log
+*.pot
+
+CMakeCache.txt
+CMakeFiles
+Makefile
+cmake_install.cmake
+pyscf/lib/deps
+pyscf/lib/config.h
+
+settings.py
+
+# NECI (FCIQMC) output files
+neci.*
+fciqmc_stats*
+FCIMCStats*
+RDMEstimates
+TwoRDM*
+spinfree_TwoRDM*
+FCIDUMP
+POPSFILE*
+INITIATORStats
+NodeFile*
+OneRDM*
+
+# Memoization and caching
+tmp/
+
+# IDEs
+.idea/
+.vscode/
+
+# --- keep large data / generated / transient out of git ---
+data/
+slurm_logs/
+logs/
+.ipynb_checkpoints/
+*.log
+*.pkl
+*.npy
+# full CG change-of-basis matrices (~19 MB; regenerate via cg_transform.py --save-transform)
+cg_transform_diamond_2x2x2_c5.npz
+*.aux
+*.out
+*.toc
+*.fls
+*.fdb_latexmk

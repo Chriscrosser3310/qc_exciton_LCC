@@ -25,7 +25,13 @@ implements):
   2.  Apply the two rectangular block encodings of ``X`` (same as exchange):
         B_mu  = BE of sum_{k} |k><k| (x) X^{mu, k}      [isometry N_up  x N_IP]
         B_lam = BE of sum_{k} |k><k| (x) X^{lam, k}     [isometry N_down x N_IP]
-      producing interpolation indices ``I`` (from mu) and ``J`` (from lambda).
+      producing interpolation indices ``I`` (from mu) and ``J`` (from lambda).  Each X
+      channel acts on an ``N_k x N_IP`` system register (momentum ``k`` + an N_IP-sized
+      matrix register), and the full construction acts on two such registers (double).
+      When ``restrict_input`` is set, a ``LessThanConstant`` comparator first flags
+      ``mu < N_up`` (= N_o, occupied) and ``lambda < N_down`` (= N_v, virtual) into a
+      per-channel ancilla, restraining the encoded operator's input to the physical
+      orbital subspace (computed here and uncomputed at the end).
   3.  Modular-add ``Q`` into each input momentum, overwriting it with the output momentum:
         |k_mu>     -->  |k_mu + Q mod N_k>      (= k_nu)
         |k_lambda> -->  |k_lambda + Q mod N_k>  (= k_sig).
@@ -36,8 +42,8 @@ implements):
       block-indexed by ``Q`` with ``I``, ``J`` the outputs of the ``X`` matrices on mu and
       lambda.  This is realized by :class:`DiagonalCoulombKernelBlockEncoding`: a QROAMClean
       loads the angle ``theta = arccos(W_{IJ}^{Q})``, one (Hadamard-sandwiched) controlled
-      ``AddIntoPhaseGrad`` executes the ``R_y`` on a block-encoding ancilla, and a
-      QROAMCleanAdjoint uncomputes the angle register.  Its QROAM tradeoff parameters are
+      ``AddIntoPhaseGrad`` followed by a ``Z`` executes the reflection ``Z R_y`` on a
+      block-encoding ancilla, and a QROAMCleanAdjoint uncomputes the angle register.  Its QROAM tradeoff parameters are
       tunable (and ``optimal_T`` chooses the closed-form Toffoli optimum).
   5.  Apply the two ``X^dagger`` (``B_mu^dagger``, ``B_lam^dagger``) on the corresponding
       registers, same as exchange.
@@ -71,8 +77,8 @@ from qualtran import (
     Signature,
     SoquetT,
 )
-from qualtran.bloqs.arithmetic import Add  # ModAdd has Qualtran bugs; Add as cost proxy
-from qualtran.bloqs.basic_gates import Hadamard
+from qualtran.bloqs.arithmetic import Add, LessThanConstant  # ModAdd has Qualtran bugs; Add as cost proxy
+from qualtran.bloqs.basic_gates import Hadamard, ZGate
 from qualtran.bloqs.block_encoding import BlockEncoding
 from qualtran.bloqs.block_encoding.lcu_block_encoding import PrepareIdentity
 from qualtran.bloqs.data_loading.qroam_clean import QROAMClean, QROAMCleanAdjoint
@@ -157,7 +163,8 @@ class DiagonalCoulombKernelBlockEncoding(BlockEncoding):
       1. ``QROAMClean`` loads ``theta_{Q,I,J} = arccos(W_{IJ}^Q)`` into a phase register,
          selected by ``(Q, I, J)``.
       2. One ``AddIntoPhaseGrad`` (Hadamard-sandwiched, controlled on a block-encoding
-         ancilla) realizes ``R_y(2 theta)`` on that ancilla.
+         ancilla) realizes ``R_y(2 theta)`` on that ancilla, followed by a ``Z`` gate so
+         the rotation becomes a reflection (``Z R_y(2 theta)``).
       3. ``QROAMCleanAdjoint`` uncomputes the angle register.
 
     The QROAM block sizes (forward and adjoint) are tunable tradeoff parameters; with
@@ -284,6 +291,7 @@ class DiagonalCoulombKernelBlockEncoding(BlockEncoding):
         ret: "Counter[Bloq]" = Counter()
         ret[self.diag_qroam] += 1          # load angles theta_{Q,I,J}
         ret[self.ctrl_phase_grad_add] += 1  # R_y(2 theta) on BE ancilla
+        ret[ZGate()] += 1                   # Z after R_y -> reflection on BE ancilla
         ret[self.diag_qroam_adjoint] += 1   # uncompute angle register
         return ret
 
@@ -340,6 +348,7 @@ class _ControlledDiagonalCoulombKernelBlockEncoding(BlockEncoding):
         ret: "Counter[Bloq]" = Counter()
         ret[self.inner.diag_qroam] += 1
         ret[AddIntoPhaseGrad(b, b).controlled().controlled()] += 1  # cc-Ry on BE ancilla
+        ret[ZGate().controlled()] += 1  # ctrl-Z reflection (identity when ctrl = 0)
         ret[self.inner.diag_qroam_adjoint] += 1
         return ret
 
@@ -357,7 +366,7 @@ class DirectCoulombBlockEncoding(BlockEncoding):
       * The rectangular ``X`` matrices (``X^{mu}``: N_up x N_IP, ``X^{lambda}``:
         N_down x N_IP) are block encoded by :class:`ReflectionRectangularBlockEncoding`.
       * The central Coulomb kernel is the **diagonal** operator
-        :class:`DiagonalCoulombKernelBlockEncoding` (QROAM -> R_y -> QROAM^dagger),
+        :class:`DiagonalCoulombKernelBlockEncoding` (QROAM -> Z R_y -> QROAM^dagger),
         block-indexed by ``Q`` with ``I``, ``J`` the outputs of the ``X`` matrices.
 
     Attributes:
@@ -390,6 +399,13 @@ class DirectCoulombBlockEncoding(BlockEncoding):
     # (LKS Householder, default) or "column" (column-by-column isometry synthesis,
     # Iten 1501.06911 + Berry Eq. 24).  The central diagonal kernel is unaffected.
     outer_synthesis: str = "reflection"
+    # Restrict each orbital input to its physical range with a comparator.  Each X channel
+    # acts on an N_k x N_IP system register (block k + matrix sized to ceil(log2 N_IP)),
+    # but the input orbital index is only valid over the first N_up (= N_o, occupied) /
+    # N_down (= N_v, virtual) entries.  When True a ``LessThanConstant`` flags ``x < N_o``
+    # (mu) / ``x < N_v`` (lambda) into a 1-qubit ancilla per channel, restraining the
+    # encoded operator to that input subspace (computed + uncomputed; O(log N_IP) Toffoli).
+    restrict_input: bool = True
 
     def __attrs_post_init__(self):
         if self.outer_synthesis not in ("reflection", "column"):
@@ -445,10 +461,12 @@ class DirectCoulombBlockEncoding(BlockEncoding):
 
     @cached_property
     def ancilla_bitsize(self) -> SymbolicInt:
-        # Two outer BEs' ancillas (matrix-row aux + flag) + central diagonal BE ancilla.
+        # Two outer BEs' ancillas (matrix-row aux + flag) + central diagonal BE ancilla,
+        # plus (when restrict_input) one input-range comparator flag per orbital channel.
         n_up = bit_length(self.n_rows_up - 1)
         n_down = bit_length(self.n_rows_down - 1)
-        return (n_up + 1) + (n_down + 1) + 1
+        cmp_flags = 2 if self.restrict_input else 0
+        return (n_up + 1) + (n_down + 1) + 1 + cmp_flags
 
     @cached_property
     def resource_bitsize(self) -> SymbolicInt:
@@ -545,10 +563,25 @@ class DirectCoulombBlockEncoding(BlockEncoding):
         # Add on QUInt(n_k) (ModAdd has Qualtran bugs).
         return Add(a_dtype=QUInt(self.k_bitsize))
 
+    @property
+    def input_comparator_mu(self) -> Bloq:
+        # Restrain the mu input (occupied): flag x < N_up (= N_o) on the N_IP-sized matrix
+        # register of the up channel.  Negligible O(log N_IP) Toffoli.
+        return LessThanConstant(bitsize=bit_length(self.n_rows_up - 1), less_than_val=self.N_up)
+
+    @property
+    def input_comparator_lam(self) -> Bloq:
+        # Restrain the lambda input (virtual): flag x < N_down (= N_v) on the down channel.
+        return LessThanConstant(bitsize=bit_length(self.n_rows_down - 1), less_than_val=self.N_down)
+
     # --------------------- Resource counts ---------------------
 
     def build_call_graph(self, ssa: "SympySymbolAllocator") -> "BloqCountDictT":
         ret: "Counter[Bloq]" = Counter()
+        # Restrain each orbital input to its physical N_o / N_v range (compute + uncompute).
+        if self.restrict_input:
+            ret[self.input_comparator_mu] += 2
+            ret[self.input_comparator_lam] += 2
         # Outer X block encodings: forward (step 2) and adjoint (step 5).
         ret[self.B_mu] += 2
         ret[self.B_lam] += 2
@@ -624,6 +657,9 @@ class _ControlledDirectCoulombBlockEncoding(BlockEncoding):
 
     def build_call_graph(self, ssa: "SympySymbolAllocator") -> "BloqCountDictT":
         ret: "Counter[Bloq]" = Counter()
+        if self.inner.restrict_input:
+            ret[self.inner.input_comparator_mu] += 2
+            ret[self.inner.input_comparator_lam] += 2
         ret[self.inner.B_mu] += 2
         ret[self.inner.B_lam] += 2
         if self.inner.N_k > 1:
