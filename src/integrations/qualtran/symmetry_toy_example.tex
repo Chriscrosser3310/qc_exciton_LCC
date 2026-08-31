@@ -1,0 +1,165 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,booktabs,parskip}
+\usepackage[colorlinks=true,linkcolor=blue,urlcolor=blue]{hyperref}
+\newcommand{\ket}[1]{\lvert #1\rangle}
+\title{\vspace{-1.2cm}A worked example: \emph{orbits} and the labels $(\mu,\nu,c)$\\[2pt]
+\normalsize a triangle with a center dot}
+\author{}\date{\today}
+\begin{document}\maketitle\vspace{-0.7cm}
+
+This is the smallest example that shows what an \textbf{orbit} is and what the three symmetry labels
+mean --- the \emph{shape} $\mu$, the \emph{teammate} $\nu$, and the \emph{copy} $c$ --- with every mode
+written out explicitly.
+
+\section{The object and the group}
+\textbf{Object:} four grid points --- a center dot and three corners of an equilateral triangle:
+\[
+   \ket{O}\ \text{(center)},\qquad \ket{A},\ \ket{B},\ \ket{C}\ \text{(corners)} .
+\]
+\textbf{Group:} the 6 symmetries of the triangle ($D_3$): the identity $e$, two rotations
+$r=+120^\circ$, $r^2=-120^\circ$, and three flips $s_A,s_B,s_C$ (each flip is the mirror through one
+corner and the midpoint of the opposite side). How they move the points:
+\begin{itemize}\itemsep0pt
+\item rotations cycle the corners $A\!\to\!B\!\to\!C\!\to\!A$ and leave $O$ fixed;
+\item flip $s_A$ fixes $A$ and $O$, and swaps $B\leftrightarrow C$ (similarly $s_B,s_C$).
+\end{itemize}
+
+\section{Orbits --- points shuffled among themselves}
+An \textbf{orbit} is a set of points the operations move only among each other. There are two:
+\[
+   \textbf{Orbit 1}=\{O\}\ \ (\text{size }1,\ \text{fixed by everything}),\qquad
+   \textbf{Orbit 2}=\{A,B,C\}\ \ (\text{size }3).
+\]
+
+\section{The modes (symmetry-adapted standing waves)}
+Inside each orbit we build combinations that behave simply under the group. These are exactly the
+standing-wave / normal modes.
+
+\textbf{From Orbit 1} $\{O\}$ --- one mode, and it is left unchanged by every operation:
+\[
+   \ket{O}.
+\]
+\textbf{From Orbit 2} $\{A,B,C\}$ --- three modes: one ``breathing'' mode (all corners in phase) and a
+locked pair of ``tilt'' modes (corner weights summing to zero):
+\[
+   \underbrace{\tfrac{1}{\sqrt3}\big(\ket{A}+\ket{B}+\ket{C}\big)}_{\text{breathing}},\qquad
+   \underbrace{\tfrac{1}{\sqrt6}\big(2\ket{A}-\ket{B}-\ket{C}\big)}_{\text{tilt }1},\qquad
+   \underbrace{\tfrac{1}{\sqrt2}\big(\ket{B}-\ket{C}\big)}_{\text{tilt }2}.
+\]
+Four points in, four modes out.
+
+\section{The labels $(\mu,\nu,c)$}
+\begin{itemize}\itemsep1pt
+\item \textbf{$\mu$ = shape} (symmetry type): here \emph{symmetric} (unchanged by every op) or \emph{E}
+      (the tilt pair). The third possible shape of $D_3$, the \emph{sign} shape, does not occur here.
+\item \textbf{$\nu$ = teammate}: some shapes come as a locked group. $E$ is a pair, so $\nu=1,2$;
+      the symmetric shape is a team of one.
+\item \textbf{$c$ = copy}: if the same shape shows up more than once, number the repeats.
+\end{itemize}
+
+\begin{center}\begin{tabular}{cccl}
+\toprule
+$\mu$ (shape) & $\nu$ (teammate) & $c$ (copy) & mode \\
+\midrule
+symmetric & 1 & 1 & $\ket{O}$ \\
+symmetric & 1 & 2 & $\tfrac{1}{\sqrt3}(\ket{A}+\ket{B}+\ket{C})$ \\
+$E$ & 1 & 1 & $\tfrac{1}{\sqrt6}(2\ket{A}-\ket{B}-\ket{C})$ \\
+$E$ & 2 & 1 & $\tfrac{1}{\sqrt2}(\ket{B}-\ket{C})$ \\
+\bottomrule
+\end{tabular}\end{center}
+Count check: symmetric ($2$ copies $\times$ team-size $1$) $+$ $E$ ($1$ copy $\times$ team-size $2$)
+$=2+2=4$ modes $=4$ points. (Multiplicities from characters: symmetric $\times2$, $E\times1$, sign
+$\times0$.)
+
+\section{Watch the group act --- this is what the labels mean}
+\textbf{Symmetric ($\mu$):} every operation leaves $\ket{O}$ and $\tfrac{1}{\sqrt3}(\ket A+\ket B+\ket C)$
+\emph{exactly unchanged}. That invariance \emph{is} what ``symmetric shape'' means.
+
+\textbf{E teammates ($\nu$):} the rotation $r$ turns the tilt pair into \emph{each other} --- it acts on
+$(\,\text{tilt }1,\ \text{tilt }2\,)$ as a genuine $120^\circ$ rotation,
+\[
+   r:\quad \begin{pmatrix}\text{tilt }1\\ \text{tilt }2\end{pmatrix}\ \longmapsto\
+   \begin{pmatrix}-\tfrac12 & -\tfrac{\sqrt3}{2}\\[2pt] \tfrac{\sqrt3}{2} & -\tfrac12\end{pmatrix}
+   \begin{pmatrix}\text{tilt }1\\ \text{tilt }2\end{pmatrix}.
+\]
+Neither tilt is left alone; they only make sense as a pair. That is why $E$ has two teammates
+($\nu=1,2$) and cannot be split --- exactly like the coordinates $(x,y)$ under rotation.
+
+\textbf{Copies ($c$):} $\ket{O}$ and $\tfrac1{\sqrt3}(\ket A+\ket B+\ket C)$ are \emph{two independent}
+symmetric modes (one on the center, one on the corners). Same shape, different states $\Rightarrow$ two
+copies.
+
+\section{What a symmetry-respecting operator looks like}
+Any operator $W$ that commutes with all 6 operations is block-diagonal by shape, acts as identity on
+teammates, and mixes only copies:
+\[
+   W \;=\; \underbrace{\begin{pmatrix} w_{11} & w_{12}\\ w_{21} & w_{22}\end{pmatrix}}_{\text{symmetric block, on }c=1,2}
+   \ \oplus\ \underbrace{w_E\cdot\mathbb 1_2}_{\text{$E$ block, same on both teammates}} .
+\]
+So $W$ may \textbf{mix $\ket O$ with the corner-sum} (both symmetric), and merely \textbf{scales the tilt
+pair} (identical factor on $\nu=1,2$). It never changes a shape and never mixes teammates. The only free
+numbers are $\sum_\mu n_\mu^2 = 2^2+1^2 = 5$ --- a $2\times2$ block plus a $1\times1$ --- even though $W$
+is a $4\times4$ operator.
+
+\section{Dictionary}
+\begin{center}\begin{tabular}{ll}
+\toprule
+term & plain meaning \\
+\midrule
+orbit & a set of grid points the operations shuffle only among each other \\
+$\mu$ (shape) & the symmetry type of a mode; the group's fixed ``menu'' of shapes \\
+$\nu$ (teammate) & which member of a locked, symmetry-degenerate group of modes \\
+$c$ (copy) & which repeat, when the same shape occurs more than once (pooled across orbits) \\
+\bottomrule
+\end{tabular}\end{center}
+
+\textbf{Map to the crystal problem.} grid points $\leftrightarrow$ the ISDF interpolation grid;
+group $\leftrightarrow$ the space group; shape $\mu \leftrightarrow$ (star, little-group irrep); teammate
+$\nu \leftrightarrow$ (star member, little partner); copy $c \leftrightarrow$ multiplicity (the material
+data); $W \leftrightarrow$ the Coulomb tensor, whose only free content lives in the copy blocks $w_i$.
+The shapes and the way teammates rotate are fixed by the group (material-free); the copies and the block
+matrices $w_i$ are the material's.
+
+\section{Within-orbit multiplicity: one orbit repeating a shape}
+Above, no shape repeated \emph{inside} a single orbit --- each orbit made each shape at most once, and
+the \emph{two} symmetric copies came from two \emph{different} orbits (center vs.\ corners). The smallest
+case where a \emph{single} orbit repeats a shape needs a \textbf{generic point}.
+
+\textbf{Setup.} Place a dot at a \emph{generic} spot inside the triangle --- \emph{not} on any mirror
+line. Applying the 6 operations spreads it to \textbf{6 points}, and they form \textbf{one orbit} (all
+six are shuffled among each other). Geometrically they are two mirror-image triangles,
+\[ \text{triangle 1: } A,B,C, \qquad \text{triangle 2: } A',B',C', \]
+glued into a single orbit because a reflection swaps the two triangles.
+
+\textbf{Modes.} The 6 modes split as:
+\begin{itemize}\itemsep1pt
+\item \emph{symmetric} ($A_1$), 1 mode: $\tfrac1{\sqrt6}(\ket A+\ket B+\ket C+\ket{A'}+\ket{B'}+\ket{C'})$
+      --- all six in phase;
+\item \emph{sign} ($A_2$), 1 mode: $\tfrac1{\sqrt6}(\ket A+\ket B+\ket C-\ket{A'}-\ket{B'}-\ket{C'})$ ---
+      the two triangles out of phase (it flips sign under a reflection);
+\item \textbf{$E$, twice} (4 states): the tilt patterns of the two triangles together span a
+      4-dimensional space carrying $E$ \emph{two} times --- two copies, each a 2-member pair. (Which
+      combinations you call copy 1 vs.\ copy 2 is the copy-mixing gauge freedom.)
+\end{itemize}
+Count: $1+1+2\cdot2 = 6 =$ orbit size. So this \emph{single} orbit produces the $E$ shape
+\textbf{twice} --- $c=1,2$ both from \emph{one} orbit. That is within-orbit multiplicity.
+
+\textbf{Why it repeats here but not for the corners.} The corners (size-3 orbit) sit \emph{on} the mirror
+lines --- each corner is fixed by a reflection (a nontrivial stabilizer), and that stabilizer ``uses
+up'' one $E$ copy, leaving $E$ once. The generic dot (size-6 orbit) sits on \emph{no} mirror --- trivial
+stabilizer, a \emph{free} orbit (the regular representation), which fits the full $E$ twice.
+
+\textbf{Rule.} The more generic the point (smaller stabilizer, bigger orbit), the more copies of each
+shape fit inside its one orbit; a free orbit fits $d_\mu$ copies of shape $\mu$, so \emph{every shape of
+dimension $\ge2$ repeats}.
+
+\textbf{Why 6 is the smallest such example.} Repeating a shape needs a shape of dimension $\ge2$ (a
+locked pair), which requires a \emph{nonabelian} group; the smallest is the triangle's (order 6), whose
+free orbit is 6 points. Abelian groups have only 1-dimensional shapes, so no orbit ever repeats a shape.
+
+\textbf{Two sources of copies, restated.} The global multiplicity $n_\mu=\sum_o a^o_\mu$ pools copies
+from (i) the same shape repeating \emph{within} one (free/generic) orbit --- this section --- and (ii) the
+same shape appearing \emph{across different} orbits --- the center-vs-corners case in \S5. In the
+4-point example only (ii) was active; here only (i).
+\end{document}

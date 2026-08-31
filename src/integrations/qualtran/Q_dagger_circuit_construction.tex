@@ -1,0 +1,193 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\hypersetup{colorlinks=true,linkcolor=blue,urlcolor=blue}
+\newcommand{\ket}[1]{\left|#1\right\rangle}
+\newcommand{\reg}[1]{\texttt{#1}}
+\newcommand{\code}[1]{\texttt{#1}}
+\title{\bf Exact circuit construction of $Q^\dagger$ (rev.\ 4)\\[2pt]
+\large the inverse space-group symmetry-adaptation transform\\
+$\ket{L}\ket{a}\;\longmapsto\;\ket{\mathbf k}\ket{I}$,\quad $\mathbf k=(k_1,k_2,k_3)$ a clean 3D mesh index}
+\author{Diamond, $6\times6\times6$ $k$-mesh ($N_k=216$, $n_{\mathrm{IP}}=136$, $|P|=48$)}
+\date{Generated \today\ --- costs computed on the actual bloqs}
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Rev.\ 4 settles the accounting after a careful pass over each stage. Included, all confirmed:
+(i) the Clifford-controlled phase-gradient rotation of arXiv:2007.07391 App.\ A ($b-2$ Toffoli,
+implemented as \texttt{SignedCtrlAddIntoPhaseGrad} and substituted everywhere);
+(ii) $P(g)$ is \textbf{charged}, not free; (iii) $\mathbf k$ is output as a clean 3D mesh index
+built by the affine map $\mathbf k=A_g\mathbf k_f$ (fractional/crystal coordinates, ready for the
+QFT); (iv) the ragged staircase is a $\sqrt{\#\mathrm{blocks}}$ binary tree; (v) the star member
+$\kappa$ is a \textbf{compact, family-dependent} index (not the global op $g$), so $g$ comes from a
+small $(f,\kappa)\!\to\!g$ lookup; (vi) $(f,\kappa)$ is erased by \textbf{reading it back from
+$\mathbf k$} (a $216$-entry lookup, $\sim\!20\times$ cheaper than a $|P|$-op argmin at this $N_k$);
+(vii) the mesh uses the global largest-first ordering. \textbf{Deliberately excluded} (available but
+not counted): hard-coding size-1/size-2 orbits, and deduping ``identical'' families --- the latter is
+not safe in general (same $(\text{star},|LG|,\text{orbits})$ does not imply conjugate little groups).
+Result: $Q^\dagger \approx \mathbf{11{,}150}$ Toffoli (exchange), $\approx \mathbf{10{,}132}$ (direct).
+\end{abstract}
+
+\tableofcontents
+
+%=====================================================================
+\section{Object, registers, conventions}
+
+$Q:\ket{\mathbf k}\ket{I}\mapsto\ket{i}\ket{a}\ket{c}$, $i=(f,\mu)$, $a=(\kappa,\nu)$, $c=$ copy.
+$Q^\dagger$ is the inverse: fused irrep register $\ket{L}=\ket{(i,c)}$ plus separate partner
+$\ket{a}$, out to $\ket{\mathbf k}\ket{I}$.
+
+\begin{center}
+\begin{tabular}{@{}llll@{}}
+\toprule
+register & holds & width & note \\ \midrule
+\reg{L}   & fused $(i,c)$, largest first & $\lceil\log_2 l_{\mathrm{pad}}\rceil$ & pad pow-2 (X)/even (W) \\
+\reg{a}   & $(\kappa,\nu)$, $\dim=m_i=|star_f|d_\mu$ & $\lceil\log_2\max_i m_i\rceil=5$ & Schur spectator \\
+$\reg{k}=(k_1,k_2,k_3)$ & momentum, 3D mesh index & $3\times3=9$ & \textbf{clean 3D (for QFT)} \\
+\reg{I}   & interpolation point & $8$ & orbit-major \\
+\reg{pg}  & phase gradient & $b=32$ & returned clean \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\paragraph{$\kappa$ is compact and family-dependent; $g$ is not $\kappa$.} Decoding $a$ gives
+$\kappa=a\,\mathrm{div}\,d_\mu \in\{0,\dots,|star_f|-1\}$ --- a compact index whose range depends on
+the family. Only $|star_f|$ of the $48$ ops are valid coset reps for $f$, so labelling $\kappa$ by the
+global op $g$ would over-pad \reg{a} (worst at high-symmetry families, e.g.\ $\Gamma$ wastes $47/48$).
+Instead the coset op $g$ is obtained from a small $(f,\kappa)\!\to\!g$ lookup ($\Sigma_f|star_f|=216$
+rows). Output $g$ is the \emph{global} op index, so the geometry tables ($A_g$, $\pi_g$, $L$) stay
+$48$-addressed and $N_k$-independent. One such lookup serves both Step 2 and Step 3.
+
+\paragraph{$\mathbf k$ is a fractional mesh index, not Cartesian.} \reg{k} holds
+$(n_1,n_2,n_3)\in\{0..5\}^3$ in the primitive reciprocal basis. This is required twice: the mesh is a
+regular integer grid closed under $P$ (so $A_g\!\cdot\!\mathbf k \bmod 6$ lands on a grid point by
+arithmetic, no table), and the QFT is a per-axis integer DFT over these indices. In this basis $A_g$ is
+a fixed small-integer matrix (entries in $\{-1,0,1\}$ for cubic), so $A_g\mathbf k_f$ is a few
+controlled adds, not a lookup.
+
+%=====================================================================
+\section{Primitive library}
+
+\begin{description}[leftmargin=0em,labelsep=0.5em]
+
+\item[\textbf{P-A. Interferometer (Givens) unitary synthesis.}] $n\times n$ unitary as a Clements/Reck
+mesh (Optica \textbf{3},1460 (2016); PRL \textbf{73},58 (1994)), block-aware QROAM-loaded angles
+(arXiv:2409.11748). Per-layer cost $=\frac{D}{2\Lambda}+2\Lambda b$ ($D=n_{\mathrm{rows}}$, $\Lambda$
+select-swap optimum), incl.\ the two App.\ A rotations; overall $\sim n^{3/2}\sqrt b$ (verified
+exponent $\to 1.50$). Bloqs \code{BlockInterferometerPhaseLayerQROAM} $+$ \code{...FinalPhasesQROAM}.
+
+\item[\textbf{P-B. QROAM (select--swap, clean).}] $d$ words $\times w$ bits: $\approx\lceil
+d/\lambda\rceil+\lambda w$, $\lambda$ optimal (arXiv:1812.00954, 1902.02134). All $\lambda$ here
+brute-forced $=$ minimum.
+
+\item[\textbf{P-C. Controlled phase-gradient rotation (arXiv:2007.07391 App.\ A).}] Controlled
+rotation to $b$ bits costs $b-2$ Toffoli: the control drives add$\leftrightarrow$subtract \code{cnot}s
+(two's complement) around one \emph{uncontrolled} addition; the $-2$ is the MSB-$|+\rangle$ discard $+$
+carry$\to$controlled-phase. Bloq \code{SignedCtrlAddIntoPhaseGrad}$(b)$; $=30$ at $b=32$ vs $60$ for
+the naive controlled adder. Implemented and substituted at every controlled-rotation site.
+
+\item[\textbf{P-D. $\sqrt{\#\mathrm{blocks}}$ staircase (binary tree).}] Ragged$\to$padded index map
+in $2$ levels: with pow-2 buddy alignment the leaf index is a free bit-slice (no compares), a QROAM
+loads per-leaf offsets, and $\sim\!\sqrt m$ compares/adds finish it. $\approx 2\sqrt m(w-1)+
+\mathrm{QROAM}(\sqrt m)$; $m=49\Rightarrow 161$ (vs $1056$ linear).
+
+\item[\textbf{P-E. Multiplexed affine map $A_g$.}] \code{SELECT} over the $48$ fixed integer matrices,
+applied in place to a coordinate register (few controlled adds; signed-perm/Clifford in the cubic
+Cartesian basis). Used for $\mathbf k=A_g\mathbf k_f$ and, optionally, the grid $\pi_g$.
+
+\item[\textbf{P-F. Comparator / controlled add / lookup permutation.}] \code{LessThanConstant},
+\code{AddK}, and in-place table permutations (forward $+$ inverse lookup).
+
+\end{description}
+
+%=====================================================================
+\section{$Q^\dagger$ step by step}
+
+\noindent\textbf{Input.} $\ket{L}\ket{a}\ket{0}_{\mathbf k}\ket{0}_I\ket{\Gamma}_{\reg{pg}}$.
+
+\subsection*{Step 1 --- Unpack $L\to(f,\mu,c)$ \hfill (P-D, P-B, P-F)}
+$\sqrt m$-tree staircase splits the fused index into (block, copy); a $49$-entry QROAM maps
+block$\to(f,\mu)$. Because $i\!\leftrightarrow\!(f,\mu)$ is a bijection, the ordinal is erased in place
+(forward $+$ inverse lookup), not merely copied.
+
+The input labels $(f,\mu,\kappa,\nu,c)$ split into two parallel legs: $(f,\kappa)\!\to\!\mathbf k$
+(Step 2) and $(\mu,\nu,c)\!\to\!I$ (Step 3), sharing $f$ and $\kappa$ (erased last, Step 4).
+
+\subsection*{Step 2 --- k-leg: build $\mathbf k=A_g\mathbf k_f$ \hfill (P-B, P-E)}
+Decode $\kappa$ from $a$ (compact); $g=(f,\kappa)\!\to\!g$ lookup. Load $\mathbf k_f$ ($16$-entry) and
+apply $\mathbf k=A_g\mathbf k_f \bmod 6$ (P-E) --- a clean 3D mesh index, ready for the QFT. $f$ and
+$\kappa$ are \emph{kept} (needed by Step 3).
+
+\subsection*{Step 3 --- I-leg: reindex $\to$ mesh $\to$ $P(g)$, then fold-back phase \hfill (P-B, P-A, P-E)}
+This is where $I$ is produced, from the fiber labels $(\mu,\nu,c)$:
+\begin{enumerate}[leftmargin=1.6em,topsep=1pt]
+  \item \textbf{reindex} irrep-major $(\mu,\nu,c)\to$ orbit-major slot (fused permutation over the
+  global largest-first index, family $f$);
+  \item \textbf{block unitary} $\bigoplus_o U_o^\dagger$ (fused mesh, all $730$ orbits, $48$ layers,
+  family $f$ selected) $\Rightarrow$ the anchor fiber $I'$ (orbit-major, so $J=I'$);
+  \item \textbf{grid permutation} $P(g)$: $\pi_g$ carries $I'\!\to\!I$ (the actual star-member
+  interpolation index); $\pi_g$ is a $48\times136$ QROAM on $(g,I')$ (or affine $A_g$ on coordinates);
+  \item \textbf{fold-back phase} $e^{-i\mathbf k\cdot L_{I'}(g)}$: $L$ from the $48\times136$ table on
+  $(g,I')$ (or the affine mod-cell reduction), $\mathbf k\!\cdot\!L$ into \reg{pg} by App.\ A rotations.
+\end{enumerate}
+
+\subsection*{Step 4 --- erase $(f,\kappa)$, uncompute scratch \hfill (P-F)}
+Now that both $\mathbf k$ and $I$ exist and $(f,\kappa)$ are no longer needed: since
+$(f,\kappa)\!\leftrightarrow\!\mathbf k$ is a bijection, read $(f,\kappa)$ back from $\mathbf k$ (a
+$216$-entry lookup) and XOR-cancel. (No $|P|$-op argmin --- that canonicalization is $\sim\!20\times$
+more expensive at $N_k=216$.) Uncompute remaining scratch.
+
+\noindent\textbf{Output.} $\ket{\mathbf k}\ket{I}\ket{\Gamma}_{\reg{pg}}$, registers separate,
+$\mathbf k$ a clean 3-vector.
+
+%=====================================================================
+\section{Cost (computed; $6\times6\times6$, $b=32$)}
+
+Measure $n_{ccz}+n_t/4$, all $\lambda$ verified optimal.
+
+\begin{center}
+\begin{tabular}{@{}lrl@{}}
+\toprule
+stage & Toffoli & note \\ \midrule
+Step 3 --- orbit mesh $\bigoplus_o U_o^\dagger$ (all $730$, App.\ A) & 8{,}670 & exact \\
+Step 3 --- reindex (fused permutation) & 420 & exact \\
+Step 3 --- $P(g)$ grid permutation $48\times136$ & 612 & exact \\
+Step 3 --- fold-back $L_I(g)$ $48\times136$ & 928 & exact \\
+Step 3 --- Bloch phase $3(b{-}2)$ & 90 & exact \\
+Step 2 --- $\mathbf k=A_g\mathbf k_f$ & $\sim$68 & est \\
+Step 2 --- $(f,\kappa)\!\to\!g$ lookup (used in Steps 2,3) & 93 & exact \\
+Step 1 --- unpack $L$ ($\sqrt m$-tree) & 161 & exact \\
+Step 4 --- erase $(f,\kappa)$ (read from $\mathbf k$) & 108 & exact \\ \midrule
+\textbf{Q$^\dagger$ total (exchange)} & $\mathbf{\approx 11{,}150}$ & \\
+\textbf{Q$^\dagger$ total (direct: fold-back phase cancels)} & $\mathbf{\approx 10{,}132}$ & \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\paragraph{Trajectory.} $12{,}214$ (rev 1, $P(g)$ wrongly free) $\to \sim13{,}900$ (rev 2, $P(g)$
+charged) $\to \sim10{,}900$ (rev 3, App.\ A) $\to \mathbf{11{,}150}$ (rev 4: $+$ compact-$\kappa$
+$(f,\kappa)\!\to\!g$ lookup, read-from-$\mathbf k$ erase, honest reindex/orderings). The small rise
+over rev 3 is the erase and $g$-lookup that rev 3 had omitted.
+
+\paragraph{Excluded levers (available, not counted).} (1) \textbf{Hard-code size-1 (identity, free) and
+size-2 (Hadamard) orbits} --- proven correct, saves $\sim\!752$ off the mesh, omitted here to keep the
+mesh a single uniform synthesis. (2) \textbf{Family dedup} --- \emph{not safe in general}: same
+$(\text{star},|LG|,\text{orbit sizes})$ does not imply conjugate little groups ($O_h$ has non-conjugate
+$\sigma_h$ vs $\sigma_d$), so ``identical-looking'' families can have different $U_o$ for size-$\ge 3$
+orbits; only the size-$\le 2$ families are provably identical. (3) \textbf{Affine $P(g)$} --- would cut
+the $612{+}928$ tables toward a few hundred but is coordinate-dependent; the table route above is the
+exactly-computed number. With (1)+(3) the total would drop toward $\sim\!8.5$--$9$k, but those are not
+counted until verified.
+
+\paragraph{$N_k$-independence.} No stage carries an $N_k$ factor: the mesh/reindex are addressed by the
+fixed $16\times136$ family/orbit structure, $P(g)$ and $A_g$ by the $48$ ops, and $\mathbf k$ is
+computed by arithmetic. The $216$-entry $(f,\kappa)\!\to\!g$ and read-from-$\mathbf k$ lookups scale as
+$\sqrt{N_k}$ (select-swap), so they stay cheap far beyond any practical mesh.
+
+\end{document}

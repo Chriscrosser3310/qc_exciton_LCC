@@ -1,0 +1,143 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{parskip}
+\usepackage{enumitem}
+\usepackage[colorlinks=true,linkcolor=blue,urlcolor=blue]{hyperref}
+
+\newcommand{\term}[1]{\medskip\noindent\textbf{#1.}\ }
+
+\title{\vspace{-1.2cm}A plain-language glossary for crystal symmetry\\[2pt]
+in ISDF--THC (diamond as the running example)}
+\author{}
+\date{\today}
+
+\begin{document}
+\maketitle
+\vspace{-0.8cm}
+
+This is a short dictionary of the symmetry words we have been using --- \emph{star}, \emph{little
+group}, \emph{high symmetry}, \emph{orbit}, \emph{copy}, and so on. Each entry is one plain sentence,
+a quick picture, and a diamond number where it helps. Read it top to bottom: the terms build on each
+other. Diamond has $|P|=48$ point-group operations and $n_{\mathrm{IP}}=136$ interpolation points per
+cell.
+
+\section*{1.\ The crystal and its symmetries}
+
+\term{Unit cell / lattice} The unit cell is the smallest repeating box of atoms; copying it on a
+regular grid (the lattice) builds the whole crystal.
+
+\term{Space group} The complete list of moves that leave the crystal looking identical --- rotations,
+reflections, and translations, and combinations of them. Diamond's is called $Fd\bar{3}m$.
+
+\term{Point group} The moves that hold one point fixed (rotations and reflections, no sliding). Diamond
+has $|P|=48$ of them. Think of it as the symmetry of a single site.
+
+\term{Symmorphic vs.\ nonsymmorphic} Symmorphic means every symmetry is a clean rotation/reflection
+(plus a whole-cell shift). Nonsymmorphic means some symmetries need a \emph{fractional} shift --- a
+``glide'' or ``screw.'' Diamond is nonsymmorphic. In practice this only sprinkles in extra phases;
+none of the ideas below change.
+
+\section*{2.\ Momentum space}
+
+\term{$k$-point (momentum)} A label for how a wave's phase steps from one cell to the next. Rather than
+follow every cell, we follow a momentum $k$. There are $N_k$ of them.
+
+\term{BvK supercell} Born--von K\'arm\'an: a finite box of $N_k$ cells with wrap-around (periodic)
+edges. $N_k$ = number of cells = number of $k$-points (8 for a $2\times2\times2$ mesh, 216 for
+$6\times6\times6$).
+
+\term{Brillouin zone} The space of allowed $k$'s. A few special spots have names --- $\Gamma$ (the
+center), $X$, $L$.
+
+\section*{3.\ Grouping the $k$-points (the heart of it)}
+
+\term{Star (a.k.a.\ family)} Take one $k$ and hit it with all 48 point-group moves. You get a
+\emph{set} of $k$'s --- that is its star. Every $k$ in a star is a symmetry-copy of the others, so you
+only need to study \emph{one} of them. A star has at most 48 members.
+
+\term{Little group (of $k$)} The subset of the 48 moves that leave \emph{this particular} $k$ where it
+is (up to a whole reciprocal-lattice jump). Rule of thumb (orbit--stabilizer):
+\[
+   (\text{star size})\times(\text{little-group size}) = 48 .
+\]
+A large little group means few star members; a small little group means many.
+
+\term{High-symmetry vs.\ generic (low-symmetry) $k$} A \emph{high-symmetry} $k$ has a \emph{big} little
+group (lots of moves fix it) and therefore a \emph{small} star. A \emph{generic / low-symmetry} $k$ has
+a \emph{small} little group and a \emph{big} star (up to 48). $\Gamma$ is the most symmetric point ---
+its little group is all 48 moves. Coarse $k$-meshes are made almost entirely of high-symmetry points;
+as you refine the mesh, the new points are mostly low-symmetry.
+
+\section*{4.\ The interpolation grid}
+
+\term{Interpolation points (ISDF), $n_{\mathrm{IP}}$} ISDF represents products of orbitals by their
+values at a small, cleverly chosen set of real-space points --- the interpolation points. Diamond uses
+$n_{\mathrm{IP}}=136$ per cell.
+
+\term{Fiber} The bundle of $n_{\mathrm{IP}}$ interpolation points sitting ``over'' one $k$. The whole
+grid is $N_k$ fibers $\times\ n_{\mathrm{IP}}$ points $=N_k\cdot n_{\mathrm{IP}}$ in total.
+
+\term{Orbit (of interpolation points)} Fix one $k$ and apply its little-group moves to one
+interpolation point: you sweep out a \emph{set} of points --- an orbit. Points only ever mix
+\emph{within} an orbit, never across orbits. An orbit is at most as big as the little group. (Do not
+confuse this with a star, which is an orbit of \emph{$k$-points}; here it is an orbit of
+\emph{interpolation points}.)
+
+\section*{5.\ Representation-theory words}
+
+\term{Representation} A rule that turns each symmetry move into a matrix acting on some space --- here,
+how the moves shuffle-and-phase the interpolation points.
+
+\term{Irreducible representation (irrep)} A representation that cannot be split into smaller
+independent pieces --- the ``atoms'' of symmetry. Each irrep has a fixed size, its \emph{dimension}.
+
+\term{Dimension and partner ($d_\mu$, $\nu$)} An irrep of dimension $d_\mu$ comes with $d_\mu$
+\emph{partners} ($\nu=1,\dots,d_\mu$) that the symmetry moves rotate into one another --- like the
+$(x,y)$ pair under rotation. Diamond's little-group irreps have dimensions 1, 2, or 3.
+
+\term{Multiplicity and copy ($n_\mu$, $c$)} How many separate times a given irrep appears in a space;
+each appearance is a \emph{copy}, labelled $c$. Symmetry cannot tell the copies apart --- so this is
+exactly where the real, material-specific numbers live.
+
+\term{Character} The trace (sum of the diagonal) of an irrep's matrices. A basis-independent
+\emph{fingerprint} that identifies the irrep.
+
+\term{Character projection} A formula built from characters that automatically extracts the part of a
+space belonging to a chosen irrep. It is the non-commutative cousin of a Fourier filter.
+
+\term{Schur's lemma / commutant} The theorem behind all the savings: any operator that respects the
+symmetry must be \emph{identity on the partners} and \emph{free on the copies}, and block-diagonal by
+irrep. That is precisely why symmetry compresses the data.
+
+\section*{6.\ Putting it together: the transform and the blocks}
+
+\term{$Q$ (symmetry adaptation)} The change of basis from the raw labels
+$|k\rangle|I\rangle$ (momentum, interpolation point) to the symmetry labels
+$|i\rangle|a\rangle|c\rangle$. It is the ``generalized Fourier transform'' of the whole space group
+(ordinary Fourier on the translations, character projection on the point group).
+
+\term{The symmetry labels $(i,a,c)$}
+\begin{itemize}[leftmargin=1.6em,topsep=2pt]
+  \item $i=(f,\mu)$: which \emph{star} $f$ and which little-group \emph{irrep} $\mu$ --- together, the
+        full-crystal irrep.
+  \item $a=(\kappa,\nu)$: which \emph{member} $\kappa$ of the star, and which \emph{partner} $\nu$ of
+        the irrep --- together, the partner index (size $m_i=|\text{star}|\cdot d_\mu$).
+  \item $c$: the \emph{copy} --- the multiplicity slot, where the material data sits.
+\end{itemize}
+
+\term{$W$ block structure} In the symmetry basis the Coulomb tensor is
+$W=\bigoplus_i \mathbb{1}_{m_i}\otimes w_i$: \emph{block-diagonal by} $i=(f,\mu)$, \emph{identity on the
+partner} $a=(\kappa,\nu)$ (so all star members and all partners share one block), and a \emph{free
+matrix} $w_i$ only on the copies $c$.
+
+\term{Fold-back lattice vector ($L$)} When a symmetry move carries an interpolation point out of its
+home cell into a neighbour, $L$ records which neighbour. It supplies the Bloch phase $e^{-ik\cdot L}$
+that relates one star member to another.
+
+\term{Unique data} The count of genuinely independent numbers left after symmetry:
+$\sum_{\text{orbits}}|o|^2$ for the transform ($6800$ at $2\times2\times2$), $\sum_i n_i^2$ for $W$
+($3384$). The remarkable part: these stay almost \emph{flat} as $N_k$ grows (the added low-symmetry
+points contribute tiny blocks), even though $N_k$ itself grows fast.
+
+\end{document}

@@ -1,0 +1,157 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{parskip}
+\usepackage{booktabs}
+\usepackage{enumitem}
+\usepackage[colorlinks=true,linkcolor=blue,urlcolor=blue]{hyperref}
+
+\title{\vspace{-1.2cm}Quantum-circuit construction of the space-group\\[2pt]
+symmetry-adaptation transform $Q:\ |k\rangle|I\rangle \to |i\rangle|a\rangle|c\rangle$}
+\author{}
+\date{\today}
+
+\begin{document}
+\maketitle
+\vspace{-0.9cm}
+
+\section*{What this is}
+
+A Qualtran resource-estimation bloq, \texttt{SymmetryAdaptationQROAM}
+(\path{src/integrations/qualtran/symmetry_adaptation_QROAM.py}), that realizes the whole-space-group
+Clebsch--Gordan / symmetry-adaptation transform $Q$ of the ISDF grid: it maps the grid basis
+$|k\rangle|I\rangle$ (momentum $k$, interpolation point $I$) to the irrep-adapted basis
+$|i\rangle|a\rangle|c\rangle$ (irrep $i$, partner $a=(\kappa,\mu)$, copy $c$). It is a
+\emph{resource model}: built from sizes only (data-free), it lays out the real sub-bloqs so
+Toffoli / Clifford / qubit counts follow from \texttt{QECGatesCost} / \texttt{QubitCount}. Diamond is
+the running example.
+
+\section*{The structure it exploits}
+
+$Q$ is block-diagonal in $k$; the $k$-points fall into \textbf{families} (stars) under the point group
+(order $|P|=48$); within a family the member blocks are \emph{phased-permutation images} of the
+representative,
+\[
+   Q^{(k_j)}_{\,\mathrm{perm}[g_j,I],\,c} = e^{-\,i\,k_j\cdot L_I(g_j)}\;Q^{(k_0)}_{\,I,\,c},
+   \qquad k_j = g_j\!\cdot\! k_0 ,
+\]
+and the representative $Q^{(k_0)}$ is itself block-diagonal over interpolation-point \textbf{orbits}
+under the little group, $Q^{(k_0)}=\bigoplus_{\text{orbits}}U_o$, each $U_o$ a small $d\times d$
+unitary, $d\le|P|$. So the only independent unitary data is $\sum_{\text{fam}}\sum_{\text{orbit}}|o|^2$
+(the ``unique data''), which is essentially flat in $n_k$.
+
+\section*{Precise mapping and register states}
+
+$Q$ is the unitary on the grid space whose matrix elements are the space-group Clebsch--Gordan
+coefficients; on a computational grid basis state,
+\[
+   Q\,|k\rangle|I\rangle \;=\; \sum_{i,a,c}\langle i,a,c|Q|k,I\rangle\;|i\rangle|a\rangle|c\rangle .
+\]
+Use the family factorization (block-diagonal in $k$)
+\[
+   Q^{(k)} \;=\; P(g_k)\,\Lambda(g_k,k)\,Q^{(f(k))},
+\]
+with $f=f(k)$ the family, $g=g_k$ the coset op ($g\!\cdot\!k_0=k$), $\kappa=\kappa(k)$ the star-member,
+$Q^{(f)}$ the family representative's little-group reduction (block-diagonal over orbits), $\Lambda$ the
+diagonal fiber phase $e^{-ik\cdot L_I(g)}$, and $P(g)$ the fiber permutation $I\mapsto\mathrm{perm}[g,I]$.
+Writing the little-group-adapted fiber index as $I'=(\mu,\nu,c)$ (little-group irrep $\mu$, partner
+$\nu=1..d_\mu$, copy $c$), the map is
+\[
+   \boxed{\,Q\,|k\rangle|I\rangle \;=\;
+   \sum_{\mu,\nu,c} e^{-\,i\,k\cdot L_{\mathrm{perm}[g,I']}(g)}\,
+   \big[Q^{(f)}\big]_{(\mu\nu c),\,I}\;
+   \big|\,i=(f,\mu)\big\rangle\,\big|\,a=(\kappa,\nu)\big\rangle\,|c\rangle\,}
+\]
+i.e. $k$'s information is re-encoded into $i$'s family label and $a$'s star-member $\kappa$, while $I$
+is reduced to $(\mu,\nu,c)$.
+
+\textbf{Registers.} Input $|k\rangle$ ($\lceil\log_2 n_k\rceil$ qubits), $|I\rangle$
+($\lceil\log_2 n_{\mathrm{IP}}\rceil$); output $|i\rangle,|a\rangle,|c\rangle$; work $|f\rangle$
+(family), $|g\rangle$ (coset op, $\lceil\log_2|P|\rceil$), and a $b$-bit phase-gradient $|\phi\rangle$ ---
+all work returned to $|0\rangle$.
+
+\textbf{Register-state trace} (the circuit applies $Q^{(k)}=P\Lambda Q^{(f)}$ to $|I\rangle$, so
+$Q^{(f)}$ acts first):
+\begin{align*}
+ &|k\rangle|I\rangle|0\rangle_f|0\rangle_g \;\xrightarrow{\ \text{(C) }k\text{-analysis}\ }\;
+   |k\rangle|I\rangle\,|f(k)\rangle\,|g(k)\rangle \\
+ &\xrightarrow{\ \text{(A) apply }Q^{(f)}\text{ to }I,\ \text{ctrl }f\ }\;
+   |k\rangle\Big(\textstyle\sum_{I'}[Q^{(f)}]_{I',I}\,|I'\rangle\Big)|f\rangle|g\rangle \\
+ &\xrightarrow{\ \text{(B) }\Lambda:\ \text{load }L_{I'}(g),\ +\,k\cdot L\ \text{into }\phi,\ \text{erase }L\ }\;
+   |k\rangle\Big(\textstyle\sum_{I'} e^{-ik\cdot L_{I'}(g)}[Q^{(f)}]_{I',I}\,|I'\rangle\Big)|f\rangle|g\rangle \\
+ &\xrightarrow{\ \text{(B) }P(g):\ I'\mapsto\mathrm{perm}[g,I']\ }\;
+   |k\rangle\Big(\textstyle\sum_{I'} e^{-ik\cdot L_{I'}(g)}[Q^{(f)}]_{I',I}\,|\mathrm{perm}[g,I']\rangle\Big)|f\rangle|g\rangle
+   \;=\;|k\rangle\,\big(Q^{(k)}|I\rangle\big)\,|f\rangle|g\rangle \\
+ &\xrightarrow{\ \text{(C) reindex }(k,I'')\to(i,a,c),\ \text{uncompute }f,g\ }\;
+   \textstyle\sum_{\mu,\nu,c}(\cdots)\,|i=(f,\mu)\rangle|a=(\kappa,\nu)\rangle|c\rangle .
+\end{align*}
+The phase-gradient $|\phi\rangle$ carries the accumulated $e^{-ik\cdot L}$ and returns to $|0\rangle$;
+$f,g$ are functions of $k$ and are uncomputed. The net effect is the boxed map above.
+
+\section*{The three-stage circuit}
+
+\begin{enumerate}[leftmargin=1.3em]
+  \item[\textbf{(A)}] \textbf{Little-group orbit-unitary synthesis (dominant).} Load only the
+  per-family-representative orbit unitaries. Orbits are grouped by size; each distinct rounded size
+  $N=2^{\lceil\log_2 d\rceil}$ is one block-diagonal
+  \texttt{BlockUnitaryInterferometerSynthesisQROAM} with $n_{\text{blocks}}=\#$orbits of that size,
+  addressed by $(\text{family},\text{orbit})$ --- \textbf{never by }$k$. Multiplexed
+  nearest-neighbour beam-splitter layers $+$ phase-gradient QROAM.
+  \item[\textbf{(B)}] \textbf{Member reconstruction.} A single \emph{select over the $|P|\!=\!48$
+  point ops}: apply $\mathrm{perm}[g,I]$ on the $I$ register, load the fold-back lattice vector
+  $L_I(g)$ from the $|P|\times n_{\mathrm{IP}}$ geometry table, and add $k\!\cdot\!L$ into a
+  phase-gradient register (\texttt{AddIntoPhaseGrad}) to apply $e^{-ik\cdot L}$. All tables are
+  $|P|\times n_{\mathrm{IP}}$, independent of $n_k$.
+  \item[\textbf{(C)}] \textbf{Reindex $(k,I')\to(i,a,c)$.} The $I'$-part is a \texttt{QROAMClean}
+  over $(\text{family},I')$ ($n_{\mathrm{IP}}$-sized); the $k\to(\text{family},\text{coset op }g)$
+  map is fixed-width decision arithmetic, so the only $k$-touching widths are $\sim\log_2 n_k$.
+\end{enumerate}
+
+\section*{Why the cost does not scale with $n_k$}
+
+The expensive part (A) loads only $\sum|o|^2$ numbers, addressed by $(\text{family},\text{orbit})$;
+members are rebuilt in (B) by a select over the \emph{$48$ point ops} (a crystal constant, not $n_k$)
+plus an arithmetic $e^{-ik\cdot L}$ phase from $|P|\times n_{\mathrm{IP}}$ geometry tables. Nothing in
+the dominant path is addressed by $k$. Concretely, from $2\times2\times2$ to $6\times6\times6$ the
+number of momenta grows $27\times$ but the dominant Toffoli grows only $\approx1.2\times$ (it tracks
+$\sum|o|^2$, set by the few large high-symmetry orbit blocks). A naive per-$k$ dense model
+($n_k\,n_{\mathrm{IP}}^2$) would grow $27\times$.
+
+\section*{Toffoli minimization}
+
+Two levers, both applied: (i) the interferometer backend replaces the earlier recursive-CSD
+(naive $\sim N^2$) route --- a $\sim17\times$ per-block reduction; (ii) for each size group the
+QROAM \textbf{select-swap} split $\lambda$ (\texttt{log\_block\_sizes}) is chosen by an
+\emph{exact argmin of the real} \texttt{get\_cost\_value} Toffoli (applied to the phase-layer, final,
+and final-adjoint lookups). E.g. the dominant $N=4$ group ($648$ blocks at $6\times6\times6$) drops
+$10{,}733\to3{,}180$ Toffoli at $\lambda=8$, and the argmin correctly reverts to $\lambda=1$ for the
+small $N=32,64$ tables where select-swap does not help.
+
+\section*{Verified resource counts (diamond)}
+
+\begin{center}
+\begin{tabular}{lrrrrr}
+\toprule
+ mesh & $n_k$ & $\sum|o|^2$ & \textbf{Toffoli} & Clifford & qubits (peak) \\
+\midrule
+ $2\times2\times2$ & 8  & 6{,}800  & \textbf{20{,}417} & $3.1\times10^{7}$ & $\approx186$ \\
+ $6\times6\times6$ & 216 & 12{,}912 & \textbf{25{,}708} & $5.7\times10^{7}$ & $\approx485$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Total Toffoli grows $1.26\times$ for a $27\times$ increase in $n_k$ (dominant stage (A) $1.23\times$,
+$\ge82\%$ of the total). Relative to the recursive-CSD backend the interferometer $+$ select-swap
+route is $23.9\times$ (2$\times$2$\times$2) / $19.2\times$ (6$\times$6$\times$6) fewer Toffolis.
+Counts come from \texttt{get\_cost\_value(bloq, QECGatesCost())} / \texttt{QubitCount()}; a
+closed-form \texttt{estimate\_symmetry\_adaptation\_resources} matches the built bloq. (The peak-qubit
+figure is register footprint $+$ peak child ancilla; \texttt{QubitCount} on the call-graph-only bloq
+returns the smaller max-over-children value $133/427$.)
+
+\section*{Files}
+
+\path{src/integrations/qualtran/symmetry_adaptation_QROAM.py} (bloq + estimator + demo),
+\path{tests/test_symmetry_adaptation_qroam.py} (10 tests), material sizes in
+\path{src/integrations/qualtran/diamond_symm_orbit_data.json}.
+
+\end{document}

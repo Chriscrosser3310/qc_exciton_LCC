@@ -16,3 +16,23 @@ dist/
 
 # local autonomous-agent runtime state
 .auto-agent/
+
+# LaTeX build artifacts (regenerable from the .tex)
+*.aux
+*.log
+*.out
+*.toc
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+*.bbl
+*.blg
+
+# Large numerical checkpoints and datasets (too big for GitHub; regenerable
+# from the run scripts in src/chem/thc/)
+*.chk
+*.pkl
+*.pt
+*.npy
+*.npz
+*.h5

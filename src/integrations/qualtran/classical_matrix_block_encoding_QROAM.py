@@ -271,8 +271,12 @@ class ClassicalMatrixBlockEncoding(BlockEncoding):
         ``three_phase_layer_prep`` replaces both state preparations with the "three diagonal
         phase layers + Hadamards" ansatz (arXiv:2409.11748 p.14).
         """
-        if not is_symbolic(n_rows) and n_rows != 2 ** bit_length(n_rows - 1):
-            raise ValueError("n_rows must be a power of two")
+        # The row/column state preparations run on a ceil(log2 n_rows)-qubit register
+        # and the Shaped tables take any n_rows, so a power of two is not required.
+        # Requiring it forced callers to pad (208 -> 256), which the analytic model
+        # does not do and which costs ~1.35x here.
+        if not is_symbolic(n_rows) and n_rows < 2:
+            raise ValueError("n_rows must be >= 2")
         if alpha is None:
             alpha = sympy.Symbol(r"\|A\|_F", positive=True)
         return cls(
@@ -719,14 +723,16 @@ class BlockDiagonalClassicalMatrixBlockEncoding(BlockEncoding):
     ) -> "BlockDiagonalClassicalMatrixBlockEncoding":
         """Data-free block-encoding for resource estimation from sizes alone.
 
-        ``n_rows`` must be a power of two; ``n_blocks`` is the (power-of-two) number of
-        blocks ``K``.  The returned bloq supports call-graph / resource estimates.
+        ``n_rows`` is the block dimension (need not be a power of two); ``n_blocks`` is
+        the number of blocks ``K``.  The returned bloq supports call-graph / resource estimates.
 
         ``three_phase_layer_prep`` replaces every state preparation (flag, ``U_R``,
         ``U_L^dag``) with the "three diagonal phase layers + Hadamards" ansatz.
         """
-        if not is_symbolic(n_rows) and n_rows != 2 ** bit_length(n_rows - 1):
-            raise ValueError("n_rows must be a power of two")
+        # Not required: the state preparations run on a ceil(log2 n_rows)-qubit
+        # register and the Shaped tables take any n_rows.  See the sibling method.
+        if not is_symbolic(n_rows) and n_rows < 2:
+            raise ValueError("n_rows must be >= 2")
         if alpha is None:
             alpha = sympy.Symbol(r"F_\max", positive=True)
         nb_x_nr = n_blocks * n_rows

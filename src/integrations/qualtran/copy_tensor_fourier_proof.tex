@@ -1,0 +1,143 @@
+\documentclass[11pt]{article}
+\usepackage[margin=0.95in]{geometry}
+\usepackage{amsmath,amssymb,amsthm,booktabs,parskip}
+\usepackage[colorlinks=true,linkcolor=blue,urlcolor=blue]{hyperref}
+\newcommand{\ket}[1]{\lvert #1\rangle}\newcommand{\bra}[1]{\langle #1\rvert}
+\newcommand{\Hom}{\operatorname{Hom}}\newcommand{\C}{\mathbb C}
+\DeclareMathOperator{\Res}{Res}
+\theoremstyle{plain}\newtheorem*{thm}{Theorem}\newtheorem*{lem}{Lemma}
+\title{\vspace{-1.2cm}The 3-leg copy tensor under the group Fourier transform\\[2pt]
+\normalsize $Q'$ (real space $\to$ irrep basis) turns it into the Clebsch--Gordan / fusion tensor}
+\author{}\date{\today}
+\begin{document}\maketitle\vspace{-0.7cm}
+
+\section{Setup}
+Let $G$ be a finite group (the space group on the BvK supercell) with unitary irreps $\{\rho\}$,
+$\dim\rho=d_\rho$, matrices $\rho(g)_{ab}$. Let $X$ be the finite set of real-space grid points; $G$
+acts on $X$ by permutation, $g\cdot x$. On $\C^X=\{$functions on $X\}$ this is the permutation
+representation
+\[
+   \pi(g):\ (\pi(g)f)(x)=f(g^{-1}x).
+\]
+Decompose $\C^X\cong\bigoplus_\rho V_\rho\otimes\C^{m_\rho}$ ($m_\rho=$ multiplicity of $\rho$). The
+\textbf{symmetry-adapted (irrep) basis} $\ket{\rho a c}$ ($a=1\dots d_\rho$ partner, $c=1\dots m_\rho$
+copy) is the one in which $\pi$ is block-diagonal, and \textbf{$Q'$} is the unitary that produces it:
+\[
+   \ket{\rho a c}=\sum_{x\in X}u^{\rho c}_a(x)\,\ket{x},\qquad u^{\rho c}_a(x)=\langle x\ket{\rho a c},
+   \qquad Q'_{x,(\rho a c)}=u^{\rho c}_a(x).
+\]
+(For real-space input, $Q'=Q\,(F\otimes\mathbb 1)$: $F$ is the cell DFT, $Q$ the point-group reduction.)
+
+\textbf{The 3-leg copy tensor} is the pointwise multiplication of $\C^X$ (the ISDF fusion vertex):
+\[
+   \delta_{xyz}=[x=y=z],\qquad m^{\rm cp}(\ket x\otimes\ket y)=\delta_{xy}\ket x .
+\]
+
+\textbf{The object to compute} --- the copy tensor with all three legs mapped to the irrep basis:
+\begin{equation}\tag{$\star$}
+   C^{\rho_3 a_3 c_3}_{\rho_1 a_1 c_1,\ \rho_2 a_2 c_2}
+   :=\bra{\rho_3 a_3 c_3}\,m^{\rm cp}\,\big(\ket{\rho_1 a_1 c_1}\otimes\ket{\rho_2 a_2 c_2}\big)
+   =\sum_{x\in X}\overline{u^{\rho_3 c_3}_{a_3}(x)}\;u^{\rho_1 c_1}_{a_1}(x)\;u^{\rho_2 c_2}_{a_2}(x).
+\end{equation}
+
+\begin{thm}
+$C$ factorizes as a \emph{group-determined Clebsch--Gordan part on the partners} times a
+\emph{reduced tensor on the copies}:
+\[
+   \boxed{\;C^{\rho_3 a_3 c_3}_{\rho_1 a_1 c_1,\ \rho_2 a_2 c_2}
+   =\sum_{\alpha=1}^{N^{\rho_3}_{\rho_1\rho_2}}
+   F^{\rho_3\alpha}_{\rho_1\rho_2}(c_1,c_2,c_3)\;
+   \big\langle \rho_3 a_3\,;\alpha\,\big|\,\rho_1 a_1;\rho_2 a_2\big\rangle\;}
+\]
+where $\langle\cdot|\cdot\rangle$ are Clebsch--Gordan coefficients, $N^{\rho_3}_{\rho_1\rho_2}$ the fusion
+multiplicity, and $F$ depends only on $(\rho_i,\alpha,c_i)$ --- not on the partners $a_i$. In particular
+$C=0$ unless $\rho_3\subseteq\rho_1\otimes\rho_2$ (the fusion rule).
+\end{thm}
+
+\section{Proof, step by step}
+
+\textbf{Step 1 (covariance of $Q'$).} By definition of the symmetry-adapted basis,
+$\pi(g)\ket{\rho a c}=\sum_{a'}\rho(g)_{a'a}\ket{\rho a' c}$ --- $\pi$ rotates the partner $a$ by the
+irrep matrix and is the identity on the copy $c$. (This is exactly $Q'^\dagger\pi(g)Q'=\bigoplus_\rho
+\rho(g)\otimes\mathbb 1_{m_\rho}$.)
+
+\textbf{Step 2 (equivariance of the copy tensor).} Pointwise multiplication commutes with the
+permutation action:
+\[
+   \big(\pi(g)f\cdot\pi(g)h\big)(x)=f(g^{-1}x)h(g^{-1}x)=(fh)(g^{-1}x)=\big(\pi(g)(fh)\big)(x),
+\]
+so $m^{\rm cp}\circ(\pi(g)\otimes\pi(g))=\pi(g)\circ m^{\rm cp}$. Thus $m^{\rm cp}$ is a
+$G$-\emph{intertwiner} $\C^X\otimes\C^X\to\C^X$. Equivalently $m^{\rm cp}=\pi(g)^{-1}m^{\rm cp}(\pi(g)\otimes\pi(g))$.
+
+\textbf{Step 3 ($C$ is an invariant tensor).} Insert Step 2 into $(\star)$ and use Step 1 on each
+ket/bra (with $\pi(g)^{-1}=\pi(g)^\dagger$):
+\[
+   C^{\rho_3 a_3 c_3}_{\rho_1 a_1 c_1,\rho_2 a_2 c_2}
+   =\sum_{a_1'a_2'a_3'}\overline{\rho_3(g)_{a_3'a_3}}\;\rho_1(g)_{a_1'a_1}\,\rho_2(g)_{a_2'a_2}\;
+   C^{\rho_3 a_3' c_3}_{\rho_1 a_1' c_1,\rho_2 a_2' c_2}\qquad\forall g\in G.
+\]
+Fix $(\rho_1,\rho_2,\rho_3,c_1,c_2,c_3)$ and read $C$ as a linear map
+$B:V_{\rho_1}\otimes V_{\rho_2}\to V_{\rho_3}$, $B(e_{a_1}\otimes e_{a_2})=\sum_{a_3}C^{\cdots a_3}_{\cdots a_1 a_2}e_{a_3}$.
+The identity above says exactly $B\,(\rho_1(g)\otimes\rho_2(g))=\rho_3(g)\,B$, i.e.
+\[
+   B\in\Hom_G\!\big(V_{\rho_1}\otimes V_{\rho_2},\,V_{\rho_3}\big).
+\]
+
+\textbf{Step 4 (Schur on the tensor product).} The space of such intertwiners has dimension equal to
+the multiplicity of $\rho_3$ in $\rho_1\otimes\rho_2$,
+\[
+   \dim\Hom_G(V_{\rho_1}\otimes V_{\rho_2},V_{\rho_3})=N^{\rho_3}_{\rho_1\rho_2}
+   =\frac1{|G|}\sum_{g}\chi_{\rho_1}(g)\chi_{\rho_2}(g)\overline{\chi_{\rho_3}(g)},
+\]
+and a canonical basis of it is the set of \textbf{Clebsch--Gordan intertwiners}
+$\{B^\alpha\}_{\alpha=1}^{N^{\rho_3}_{\rho_1\rho_2}}$, with matrix elements the CG coefficients
+$\langle\rho_3 a_3;\alpha|\rho_1 a_1;\rho_2 a_2\rangle$. (If $N=0$, the space is $\{0\}$: the fusion rule.)
+
+\textbf{Step 5 (expand $C$ in that basis).} Since $B\in\Hom_G(\dots)$ it is a unique linear combination
+of the $B^\alpha$; the coefficients are numbers depending only on what was held fixed, namely
+$(\rho_1,\rho_2,\rho_3,\alpha)$ and the copies $(c_1,c_2,c_3)$:
+\[
+   C^{\rho_3 a_3 c_3}_{\rho_1 a_1 c_1,\rho_2 a_2 c_2}
+   =\sum_{\alpha}F^{\rho_3\alpha}_{\rho_1\rho_2}(c_1,c_2,c_3)\,
+   \langle\rho_3 a_3;\alpha|\rho_1 a_1;\rho_2 a_2\rangle .
+\]
+This is the boxed statement. Projecting on the CG basis (orthogonality
+$\sum_{a_1a_2a_3}\langle\rho_3a_3;\alpha|\dots\rangle\overline{\langle\rho_3a_3;\beta|\dots\rangle}=d_{\rho_3}\delta_{\alpha\beta}$)
+gives the reduced coefficient explicitly (Wigner--Eckart form):
+\[
+   F^{\rho_3\alpha}_{\rho_1\rho_2}(c_1,c_2,c_3)
+   =\frac1{d_{\rho_3}}\sum_{a_1a_2a_3}
+   \overline{\langle\rho_3 a_3;\alpha|\rho_1 a_1;\rho_2 a_2\rangle}\;
+   C^{\rho_3 a_3 c_3}_{\rho_1 a_1 c_1,\rho_2 a_2 c_2}.\qquad\blacksquare
+\]
+
+\textbf{Reading.} The partner dependence $(a_1,a_2,a_3)$ is \emph{entirely} the group's CG coefficients;
+the material/$X$-dependent content sits in the reduced tensor $F$ on the copies. The copy tensor,
+Fourier-transformed by $Q'$, \emph{is} the fusion tensor of $G$.
+
+\section{Abelian special case (recovers modulo addition)}
+Let $G=\mathbb Z_N$ act on $X=\mathbb Z_N$ by translation (the pure translation / momentum case).
+All irreps are $1$-dimensional characters $\chi_k(x)=e^{2\pi i k x/N}$, $k=0,\dots,N-1$: no partner
+index, $d_\rho=1$, and (regular representation) each appears once, $m_\rho=1$, so no copy index. The
+symmetry-adapted basis is the Fourier basis $u_k(x)=e^{2\pi i kx/N}/\sqrt N$. Then $(\star)$ is a direct
+sum:
+\[
+   C^{k_3}_{k_1 k_2}=\sum_{x=0}^{N-1}\overline{u_{k_3}(x)}\,u_{k_1}(x)\,u_{k_2}(x)
+   =\frac1{N^{3/2}}\sum_{x}e^{2\pi i(k_1+k_2-k_3)x/N}
+   =\frac1{\sqrt N}\,\big[k_1+k_2\equiv k_3\ (\mathrm{mod}\ N)\big].
+\]
+So $C=\tfrac1{\sqrt N}\,\delta_{k_1+k_2\equiv k_3}$ --- the \textbf{modulo-addition tensor}. This matches
+the theorem: $1$-dim irreps $\Rightarrow$ $N^{k_3}_{k_1 k_2}=[k_1{+}k_2\equiv k_3]$ (fusion $=$ group
+addition on $\widehat G$), the CG coefficient is the scalar $\delta_{k_1+k_2\equiv k_3}$, and
+$F=1/\sqrt N$ (trivial reduced tensor since $m\equiv1$). For a general abelian $G$-set (copies present)
+the same computation gives $C^{k_3 c_3}_{k_1 c_1,k_2 c_2}=F(c_1,c_2,c_3)\,\delta_{k_1+k_2\equiv k_3}$:
+modulo addition on the momenta, reduced data on the copies.
+
+\section{Why this is the ISDF story}
+The ISDF fusion vertex (co-density $=X\!\cdot\!X$, a pointwise product) is $m^{\rm cp}$. Sandwiched by
+the space-group $Q'$ it becomes the fusion tensor: momentum conservation is the abelian (translation)
+factor $\delta_{k_1+k_2\equiv k_3}$; the point group contributes the genuine CG coefficients on the
+partners plus the reduced $F$ on the copies. This is exactly why the fusion \emph{densifies} in the
+irrep basis (it is no longer a sparse $\delta$, but a CG tensor), and why full space-group symmetry
+gives momentum-$\delta\times$point-group-CG$\times$reduced-tensor.
+\end{document}

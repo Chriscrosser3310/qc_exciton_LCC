@@ -1,0 +1,112 @@
+\documentclass[11pt]{article}
+\usepackage[margin=0.9in]{geometry}
+\usepackage{amsmath,amssymb,booktabs,parskip}
+\usepackage[colorlinks=true,linkcolor=blue,urlcolor=blue]{hyperref}
+\newcommand{\code}[1]{\texttt{\small #1}}
+\title{\vspace{-1.2cm}Toffoli resource estimate: BSE effective Hamiltonian\\[2pt]
+(diamond, $6{\times}6{\times}6$) --- raw vs.\ symmetry-adapted ISDF--THC}
+\author{}\date{\today}
+\begin{document}\maketitle\vspace{-0.8cm}
+
+\section*{Setup and method}
+Multi-exciton BSE effective Hamiltonian; Coulomb / screened Coulomb via ISDF--THC; direct + exchange
+terms. Diamond, $6{\times}6{\times}6$ $k$-mesh ($N_k=216$), point group $|P|=48$, $n_{\rm ao}=26$/cell.
+Rank $c5\Rightarrow n_{\rm IP}=136$; $c8\Rightarrow n_{\rm IP}=208$.
+All counts from the analytic cost model \code{XPRIZE\_paper/script/\_resource\_dispatch.py} at
+angle precision $b=32$, \code{mode="T-opt"} (per-QROAM select--swap $\lambda$ chosen for minimum
+Toffoli). Primitives used: P-06 \code{unitary\_synthesis}, P-07 \code{forward\_isometry\_synthesis},
+P-09 \code{diagonal\_matrix\_block\_encoding}, P-12 \code{eigendecomposition\_block\_encoding}
+(ledger \code{XPRIZE/context/primitives.md}).
+
+\textbf{Operations} (per the model, $N_k$ carried as the QROAM address prefix):
+\begin{enumerate}\itemsep0pt
+\item \textbf{Exchange} $\to$ eigendecomposition BE of $W$: $216$ blocks of $n_{\rm IP}\times n_{\rm IP}$.
+\item \textbf{Direct} $\to$ diagonal BE of $W$: $216\times n_{\rm IP}^2$.
+\item Occupied $X$: $6\times$ isometry $n_{\rm IP}\times4$ (216 blocks).
+\item Virtual $X$: $6\times$ isometry $n_{\rm IP}\times22$ (216 blocks).
+\end{enumerate}
+
+\section*{Raw (k-points only, no point-group symmetry)}
+\begin{center}\begin{tabular}{lrr}
+\toprule
+ & $n_{\rm IP}=208$ (c8) & $n_{\rm IP}=136$ (c5)\\\midrule
+Exchange (eigendecomp) & 1{,}024{,}873 & \\
+Direct (diagonal) & 41{,}655 & \\
+$6\times$ occ isometry & 213{,}768 & \\
+$6\times$ virt isometry & 1{,}175{,}724 & \\
+\textbf{TOTAL} & \textbf{2{,}456{,}020} & \textbf{1{,}737{,}854}\\
+\bottomrule
+\end{tabular}\end{center}
+
+\section*{Symmetry-adapted structure (jsun3 \code{THC\_general/log\_irreps}, diamond $6{\times}6{\times}6$ c5)}
+\begin{itemize}\itemsep0pt
+\item $W$ (\code{grid-grid}): \textbf{57} whole-space-group irrep blocks $(f,\mu)$; $\sum m_i n_i=29{,}376$;
+      $\sum n_i=1768$ (copies/eigenvalues); $\sum n_i^2=85{,}864$ (unique $W$ data); $n_i\in[1,80]$.
+\item Orbits (Q; \code{diamond\_symm\_orbit\_data.json}): \textbf{730} orbit-blocks, $\sum|o|^2=12{,}912$;
+      histogram $\{1{:}104,2{:}398,3{:}40,4{:}106,6{:}34,8{:}32,12{:}8,16{:}5,24{:}2,48{:}1\}$.
+\item $X$ (\code{grid-ao}): \textbf{49} blocks; $\sum n_{\rm grid}n_{\rm ao}=17{,}006$; $n_{\rm grid}\in[6,80]$, $n_{\rm ao}\in[1,18]$.
+\end{itemize}
+
+\section*{Symmetry-adapted construction}
+Replace $X,W$ by their irrep-block structure; add \textbf{6 $Q$'s} (generalized-Fourier / symmetry
+adaptation, reused across grid legs) + register-recording (family/coset canonicalization). In the
+symmetry basis both $W$'s are diagonalized, \emph{but the eigenvector unitary must still be built}:
+\[
+   W \;=\; U\,D\,U^\dagger,\qquad U=\bigoplus_i \mathbb 1_{m_i}\otimes u_i \ \text{(copy-space, blocks }n_i).
+\]
+\begin{itemize}\itemsep0pt
+\item \textbf{Exchange} $W=2U+D$: $U=$ block \code{unitary\_synthesis} over copy blocks $\{n_i\}$
+      (group by size, floor${<}4\!\to\!4$); $D=$ diagonal BE over $\sum n_i$ eigenvalues.
+\item \textbf{Direct} $W$: diagonal BE over $\sum n_i^2$ reduced values.
+\item \textbf{6 $Q$}: each $=$ orbit synthesis (block \code{unitary\_synthesis} over the orbit histogram)
+      $+$ reconstruction $\approx 2770\cdot\tfrac{32}{24}$ (stage-B perm/fold-back, $n_k$-indep).
+\item \textbf{$X$}: $6\times$ occ $+\ 6\times$ virt isometries, family-reduced (\code{forward\_isometry\_synthesis}$(n_{\rm IP},M,N_{\rm fam}{=}16,b)$).
+\end{itemize}
+
+\begin{center}\begin{tabular}{lrr}
+\toprule
+ & c5 ($n_{\rm IP}=136$, exact) & c8 ($n_{\rm IP}=208$, extrap.)\\\midrule
+Exchange $W=2U+D$ & 153{,}115 \small($U{=}76{,}276,D{=}563$) & 278{,}162 \small($U{=}138{,}729,D{=}704$)\\
+Direct $W$ (diagonal) & 3{,}983 & 6{,}099\\
+$6\times Q$ & 114{,}780 \small($Q{=}19{,}130$) & 149{,}238 \small($Q{=}24{,}873$)\\
+$X$ isometries & 342{,}264 & 403{,}572 \small(exact@208)\\
+\textbf{TOTAL} & \textbf{614{,}142} & \textbf{837{,}071}\\
+reduction vs.\ raw & \textbf{2.83$\times$} & \textbf{2.93$\times$}\\
+\bottomrule
+\end{tabular}\end{center}
+
+\textbf{c8 extrapolation:} scale multiplicities $n_i\times r$ and orbit counts $\times r$,
+$r=208/136=1.529$ (both consistent with grid dim $\to 216\cdot208=44{,}928$); \#irreps ($57$) and
+orbit-size shape held fixed; recompute every cost with the primitives. $X$ computed \emph{exactly} at
+$208$. Scaled: $\sum n_i{=}2705$, $\sum n_i^2{=}200{,}735$, $\sum|o|^2{=}20{,}856$.
+
+\section*{Key findings}
+\begin{itemize}\itemsep0pt
+\item \textbf{$W$ collapses, $X$ does not.} $W$ becomes diagonal $\Rightarrow$ data $\to$ eigenvalues
+      (direct $W\!\sim\!6$k). $X$ stays an isometry: the $M$-column rotation structure is irreducible, so
+      symmetry only shrinks the row/data dimension. $X$ reduces $\sim\!3.4\times$ (from the $k$-family
+      fold $216\!\to\!16$) and is the \textbf{dominant} symmetry-adapted term ($\sim48\%$).
+\item \textbf{Eigenvector unitary $U$ is real cost.} $W=UDU^\dagger$ needs $U,U^\dagger$; $2U$ is the
+      2nd-largest term ($\sim33\%$). (An earlier draft wrongly dropped it to just $D$.)
+\item \textbf{6 $Q$'s are cheap} ($\sim18\%$): the true orbits are mostly tiny (104 size-1, 398 size-2).
+\item \textbf{Block isometry $\not<$ dense-per-family.} Summing the 49 \code{grid-ao} blocks
+      independently (425k c5 / 503k c8) \emph{loses amortization} and beats neither; the dense-16-family
+      form is used. A proper shared-column-loop block synthesis (P-15/16, loop to $\max_i n_{\rm band}$)
+      could trim $X$ to $\sim\!250$--$350$k (total $\sim\!740$--$780$k), not computed here.
+\end{itemize}
+
+\section*{Reproduction}
+\code{cd XPRIZE\_paper/script; import \_resource\_dispatch as D}; $b{=}32$, \code{mode="T-opt"},
+$N_k{=}216$, $N_{\rm fam}{=}16$.
+Raw: \code{D.eigendecomposition\_block\_encoding($n_{\rm IP}$,216,b)}, \code{D.diagonal\_matrix\_block\_encoding($n_{\rm IP}$,216,b)},
+\code{D.forward\_isometry\_synthesis($n_{\rm IP}$,M,216,b)}.
+Symm: $U={\sum}$\code{unitary\_synthesis}($n_i$ grouped by size, count, $b$); $D$/direct $=$ diagonal BE via
+\code{unranged\_qroam\_compute\_cost}$+(b{-}2)+$\code{uncompute}, $\lambda$ T-opt, over table $\sum n_i$ resp.\ $\sum n_i^2$;
+$Q_{\rm orbit}={\sum}$\code{unitary\_synthesis}(orbit sizes grouped); $X=$\code{forward\_isometry\_synthesis}($n_{\rm IP}$,M,16,b).
+Structure: \code{log\_irreps/data\_ov\_diamond\_6x6x6\_c5\_grid-grid.txt} ($n_i$),
+\code{...\_grid-ao.txt} ($X$ blocks), \code{diamond\_symm\_orbit\_data.json} (orbits).
+
+\textbf{Caveats:} c5 exact, c8 extrapolated; occ/virt split of $n_{\rm ao}$ taken $4{:}22$ proportional;
+$X$ uses dense-per-family (not the shared-loop block form); reconstruction is a scaled estimate; the
+whole layer is the analytic model, not an executed circuit.
+\end{document}

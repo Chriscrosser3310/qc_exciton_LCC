@@ -1,71 +1,39 @@
-r"""Qubitization *walk operator* for the BSE Hamiltonian.
+r"""Qubitization walk operator for the BSE Hamiltonian, in the form of ``main.tex`` Sec. 2.
 
-This is an alternative block encoding of the same BSE operator built by
-:class:`~.bse_block_encoding.BSEBlockEncoding`, assembled as a *qubitized walk*
-``W = (2\Pi - I) U_A`` instead of the ``<psi| S P A D P S |psi>`` sandwich.  Where the
-plain block encoding returns ``U_A`` (with subnormalization ``Lambda``), the walk operator
-turns that Hermitian-unitary ``U_A`` into a rotation whose spectrum encodes the operator's
-eigenvalues, so phase estimation on ``W`` reads them off directly.
+.. math::  W = (2\Pi - I)\, U_A ,
 
-Construction (the standard LCU / qubitization reflection-walk)
--------------------------------------------------------------
-The target Hermitian operator is a real linear combination of block-encoded pieces
-
-.. math::  A = \sum_i c_i\, K^\dagger A_i K, \qquad c_i \in \mathbb{R},
-
-where ``K`` is a fixed conjugation (here the particle-number counting ``P``,
-antisymmetrizers ``S``, and the diagonal ``D``, with ``D`` commuting with the ``A_i``) and
-each ``A_i`` has a **Hermitian-unitary** block encoding ``U_{A_i}``:
+with :math:`U_A` the five-template block encoding of :class:`BSEBlockEncoding` and
+:math:`\Pi = |0\rangle\langle 0|` on the full ancilla register (which carries the LCU
+selection bits).  On the invariant two-dimensional subspace of an eigenvector
+:math:`H_{\mathrm{BSE}}|j\rangle = E_j|j\rangle` the walk acts as a rotation by
+:math:`\arccos(E_j/\lambda)`, so phase estimation on :math:`W` returns
+:math:`E_j = \lambda\cos\theta_j` and
 
 .. math::
-    \Pi_a U_{A_i} \Pi_a = \Pi_a\, A_i/\alpha_i, \qquad
-    U_{A_i} = U_{A_i}^\dagger, \qquad U_{A_i}^2 = I,
-    \qquad \Pi_a = |0^a\rangle\langle 0^a| \otimes I.
+    C_{\mathrm{QPE}} = \left\lceil\frac{\pi\lambda}{2\epsilon_{\mathrm{QPE}}}\right\rceil
+                       C_{\mathrm{walk}} .
 
-With the LCU normalization ``Lambda = sum_i |c_i| alpha_i`` and
+Why :math:`U_A` is already self-inverse
+---------------------------------------
+The walk requires :math:`U_A^2 = I`.  The manuscript asserts this ("we need to make our
+:math:`U_i` self-inverse throughout the construction") without discharging it; here it is
+discharged structurally, and for free:
 
-.. math::
-    \mathrm{PREP}\,|0\rangle = \sum_i \sqrt{|c_i|\alpha_i/\Lambda}\, |i\rangle,
-    \qquad \widetilde U_i = \operatorname{sgn}(c_i)\, U_{A_i},
-    \qquad \mathrm{SELECT} = \sum_i |i\rangle\langle i| \otimes \widetilde U_i,
+* every template is a **congruence** :math:`M Z M^\dagger`, so
+  :math:`(MZM^\dagger)^2 = M Z^2 M^\dagger = I` as soon as :math:`Z^2 = I`;
+* every central :math:`Z` applies :math:`Z R_y(2\theta)` rather than :math:`R_y(2\theta)`.
+  :math:`Z R_y(2\theta)` is real symmetric and squares to the identity, and the extra
+  :math:`Z` is **Clifford** -- zero Toffolis;
+* the signs of the real LCU coefficients are absorbed into the selected unitaries, so
+  SELECT stays Hermitian; PREPARE and the routing SWAP network are unitary conjugations
+  and cancel in the square.
 
-the sign of each real coefficient is absorbed into the selected unitary, so ``SELECT`` stays
-Hermitian and involutive (``SELECT^dag = SELECT``, ``SELECT^2 = I``).  The block encoding is
+The single exception is the Frobenius central (``exchange_central="frobenius"``), which
+is *not* a congruence.  There the Hermitian variant is used -- the inner Frobenius
+encoding wrapped in ``DirectHermitianBlockEncoding``, i.e. the four-preparation form --
+at roughly twice the bare central cost.
 
-.. math::  U_A = (\mathrm{PREP}^\dagger \otimes I)\, K^\dagger\, \mathrm{SELECT}\, K\, (\mathrm{PREP} \otimes I),
-
-which is itself Hermitian and involutive (``U_A = U_A^\dagger``, ``U_A^2 = I``) because
-``SELECT`` is and ``K``, ``PREP`` are unitary.  With the total projector
-``\Pi = |0\rangle\langle 0|_{\mathrm{LCU}} \otimes \Pi_a`` one has
-``\Pi U_A \Pi = \Pi\, A/\Lambda``, so the qubitized walk operator is simply
-
-.. math::  W = (2\Pi - I)\, U_A.
-
-On the invariant 2-D subspace of an eigenvector ``A|k> = E_k|k>`` (with ``x_k = E_k/Lambda``)
-the walk acts as the rotation ``[[x_k, sqrt(1-x_k^2)], [-sqrt(1-x_k^2), x_k]]``, so the
-eigenvalues of ``W`` are ``e^{+- i arccos(E_k/Lambda)}`` and phase estimation recovers
-``E_k = Lambda cos(theta_k)``.
-
-Hermitian-unitary terms
------------------------
-``U_A`` is produced by :class:`~.bse_block_encoding.BSEBlockEncoding` in its ``hermitian``
-mode.  The Fock, direct-Coulomb, and combined-term central pieces are already involutive --
-their diagonal / SVD sub-encodings apply ``Z R_y`` rather than ``R_y``, which makes the
-block-encoding ancilla a *reflection* (``Z R_y(2 theta)`` is a Hermitian unitary).  The only
-term that needs adapting is the exchange Coulomb sandwich ``B C B^dag``: it is Hermitian and
-involutive exactly when its full-matrix central ``C`` is, so ``hermitian`` mode switches that
-central to the Hermitian Frobenius-norm encoding
-(``ExchangeCoulombBlockEncoding.hermitian_fro_central``).
-
-Data-free convention
---------------------
-Like the rest of this package the construction is *data-free*: ``build_call_graph`` emits the
-inner block encoding ``U_A`` and the reflection ``2\Pi - I`` (a
-:class:`ReflectionUsingPrepare` about ``|0>`` on the full ancilla register, which carries the
-LCU selection bits), and all Toffoli / qubit counts come from Qualtran's resource counter
-walking that graph.  No real coefficient / angle data is populated; in particular ``PREP`` is
-modeled by the same data-free coefficient-state proxy as the plain block encoding and the
-``sgn(c_i)`` sign flips are Clifford (free) bookkeeping inside ``SELECT``.
+Data-free: structure only; all counts come from Qualtran's resource counter.
 """
 
 from __future__ import annotations
@@ -83,7 +51,7 @@ from qualtran.symbolics import SymbolicFloat, SymbolicInt
 
 try:
     from .bse_block_encoding import BSEBlockEncoding
-except ImportError:
+except ImportError:  # pragma: no cover - script/direct execution
     from bse_block_encoding import BSEBlockEncoding
 
 if TYPE_CHECKING:
@@ -93,18 +61,11 @@ if TYPE_CHECKING:
 
 @attrs.frozen
 class BSEWalkOperator(Bloq):
-    r"""Qubitization walk operator ``W = (2\Pi - I) U_A`` for the BSE Hamiltonian.
+    r"""``W = (2\Pi - I) U_A`` for the BSE Hamiltonian.
 
-    ``U_A`` is the Hermitian-unitary BSE block encoding
-    (:class:`~.bse_block_encoding.BSEBlockEncoding` in ``hermitian`` mode) of
-    ``A/Lambda``; ``2\Pi - I`` reflects about ``|0>`` on the full ancilla register (which
-    includes the LCU selection bits), realized by :class:`ReflectionUsingPrepare`.  The walk
-    acts in place on the same ``(system, ancilla, resource)`` registers as ``U_A``; its
-    eigenvalues are ``e^{+- i arccos(E_k/Lambda)}``, so phase estimation on ``W`` recovers
-    the BSE eigenvalues ``E_k = Lambda cos(theta_k)``.
-
-    Attributes mirror :class:`~.bse_block_encoding.BSEBlockEncoding`:
-        m, N_o, N_v, N_IP, N_k, phase_bitsize, optimal_T -- see that class.
+    Attributes mirror :class:`BSEBlockEncoding`: ``m, N_o, N_v, N_IP, N_k,
+    phase_bitsize, optimal_T, exchange_central, real_data`` and the six ``lambda_*``
+    component subnormalizations.
     """
 
     m: int
@@ -114,25 +75,37 @@ class BSEWalkOperator(Bloq):
     N_k: int
     phase_bitsize: int = 32
     optimal_T: bool = False
-    # Rectangular X-tensor synthesis, forwarded to the inner block encoding:
-    # "reflection" (LKS Householder, default) or "column" (Iten/Berry, ~2x cheaper).
-    outer_synthesis: str = "reflection"
+    exchange_central: str = "eigendecomposition"
+    ex_density_fitting: bool = False
+    real_data: bool = False
+    lambda_0_o: SymbolicFloat = 1.0
+    lambda_0_v: SymbolicFloat = 1.0
+    lambda_oo: SymbolicFloat = 1.0
+    lambda_vv: SymbolicFloat = 1.0
+    lambda_ov_ex: SymbolicFloat = 1.0
+    lambda_ov_dir: SymbolicFloat = 1.0
 
     # ------------------------------ inner pieces ------------------------------
 
     @cached_property
     def block_encoding(self) -> BSEBlockEncoding:
-        """The Hermitian-unitary BSE block encoding ``U_A`` (``U_A = U_A^dag``, ``U_A^2 = I``)."""
+        r"""The self-inverse block encoding :math:`U_A` (:math:`U_A^2 = I`)."""
         return BSEBlockEncoding(
             m=self.m, N_o=self.N_o, N_v=self.N_v, N_IP=self.N_IP, N_k=self.N_k,
-            phase_bitsize=self.phase_bitsize, optimal_T=self.optimal_T, hermitian=True,
-            outer_synthesis=self.outer_synthesis,
+            phase_bitsize=self.phase_bitsize, optimal_T=self.optimal_T,
+            exchange_central=self.exchange_central, real_data=self.real_data,
+            ex_density_fitting=self.ex_density_fitting,
+            lambda_0_o=self.lambda_0_o, lambda_0_v=self.lambda_0_v,
+            lambda_oo=self.lambda_oo, lambda_vv=self.lambda_vv,
+            lambda_ov_ex=self.lambda_ov_ex, lambda_ov_dir=self.lambda_ov_dir,
         )
 
     @cached_property
     def reflect(self) -> ReflectionUsingPrepare:
-        """``2\\Pi - I``: reflection about ``|0>`` on the full ancilla register."""
-        return ReflectionUsingPrepare(self.block_encoding.signal_state, global_phase=-1)
+        r""":math:`2\Pi - I` about :math:`|0\rangle` on the full ancilla register."""
+        return ReflectionUsingPrepare(
+            self.block_encoding.signal_state, global_phase=-1
+        )
 
     # ------------------------------- interface --------------------------------
 
@@ -150,7 +123,8 @@ class BSEWalkOperator(Bloq):
 
     @property
     def Lambda(self) -> SymbolicFloat:
-        r"""LCU normalization ``Lambda = sum_i |c_i| alpha_i`` (data-free: sum of term alphas)."""
+        r""":math:`\lambda = m\lambda_0 + \frac{m(m-1)}{2}(\lambda_{oo}+\lambda_{vv})
+        + m^2(\lambda_{ov}^{\mathrm{ex}}+\lambda_{ov}^{\mathrm{dir}})`."""
         return self.block_encoding.alpha
 
     @cached_property
@@ -166,14 +140,33 @@ class BSEWalkOperator(Bloq):
     def build_call_graph(self, ssa: "SympySymbolAllocator") -> "BloqCountDictT":
         return {self.block_encoding: 1, self.reflect: 1}
 
-    def get_ctrl_system(self, ctrl_spec: "CtrlSpec") -> "Tuple[Bloq, AddControlledT]":
-        """Single-qubit control: only the reflection gains the control.
+    def walk_cost(self) -> int:
+        """``C_walk`` in Toffolis."""
+        try:
+            from .toffoli_cost import toffoli_count
+        except ImportError:
+            from toffoli_cost import toffoli_count
+        return toffoli_count(self)
 
-        ``.controlled()`` returns :class:`_ControlledBSEWalkOperator`, which leaves the
-        Hermitian-unitary ``U_A`` uncontrolled and promotes the reflection to its controlled
-        form -- the standard cheap controlled-walk primitive used inside qubitization phase
-        estimation.
-        """
+    def template_costs(self) -> dict:
+        """``C_walk`` broken out by the manuscript's per-template symbols."""
+        try:
+            from .toffoli_cost import toffoli_count
+        except ImportError:
+            from toffoli_cost import toffoli_count
+        d = dict(self.block_encoding.template_costs())
+        d['C_reflect'] = toffoli_count(self.reflect)
+        d['C_walk'] = self.walk_cost()
+        return d
+
+    def qpe_cost(self, epsilon_qpe: float) -> float:
+        r""":math:`\lceil \pi\lambda / 2\epsilon\rceil \, C_{\mathrm{walk}}`."""
+        import math
+
+        return math.ceil(math.pi * float(self.Lambda) / (2.0 * epsilon_qpe)) * self.walk_cost()
+
+    def get_ctrl_system(self, ctrl_spec: "CtrlSpec") -> "Tuple[Bloq, AddControlledT]":
+        """Standard cheap controlled walk: only the reflection gains the control."""
         return get_ctrl_system_1bit_cv_from_bloqs(
             self, ctrl_spec, current_ctrl_bit=None,
             bloq_with_ctrl=_ControlledBSEWalkOperator(self), ctrl_reg_name='ctrl',
@@ -182,12 +175,10 @@ class BSEWalkOperator(Bloq):
 
 @attrs.frozen
 class _ControlledBSEWalkOperator(Bloq):
-    """Singly-controlled :class:`BSEWalkOperator` (controls the reflection only).
+    r"""Singly-controlled :class:`BSEWalkOperator`.
 
-    The external control reaches only the reflection ``2\\Pi - I`` (via
-    :class:`ReflectionUsingPrepare`'s ``control_val``); the Hermitian-unitary ``U_A`` is
-    applied unconditionally.  This is the standard qubitization controlled-walk used for
-    phase estimation, at essentially the uncontrolled cost.
+    :math:`U_A` is applied unconditionally and only :math:`2\Pi - I` is controlled -- the
+    standard qubitization controlled-walk, at essentially the uncontrolled cost.
     """
 
     inner: BSEWalkOperator
@@ -204,6 +195,6 @@ class _ControlledBSEWalkOperator(Bloq):
 
     def build_call_graph(self, ssa: "SympySymbolAllocator") -> "BloqCountDictT":
         ret: "Counter[Bloq]" = Counter()
-        ret[self.inner.block_encoding] += 1   # U_A applied unconditionally
-        ret[self.reflect_ctrl] += 1           # only the reflection gains the control
+        ret[self.inner.block_encoding] += 1
+        ret[self.reflect_ctrl] += 1
         return ret

@@ -83,6 +83,7 @@ from qualtran.bloqs.block_encoding import BlockEncoding
 from qualtran.bloqs.block_encoding.lcu_block_encoding import PrepareIdentity
 from qualtran.bloqs.data_loading.qroam_clean import QROAMClean, QROAMCleanAdjoint
 from qualtran.bloqs.mcmt.specialized_ctrl import get_ctrl_system_1bit_cv_from_bloqs
+from qualtran.bloqs.mcmt import And
 from qualtran.bloqs.rotations.phase_gradient import AddIntoPhaseGrad
 from qualtran.bloqs.state_preparation import PrepareUniformSuperposition
 from qualtran.bloqs.state_preparation.prepare_base import PrepareOracle
@@ -98,6 +99,7 @@ try:
     from .rectangular_block_encoding_reflection import (
         ReflectionRectangularBlockEncoding,
     )
+    from .qroam_block_sizes import optimal_log_block_sizes_measured
     from .state_prep_QROAM import _cap_log_block_sizes, _to_tuple_or_none
 except ImportError:
     from block_isometry_column_synthesis_QROAM import ColumnIsometryRectangularBlockEncoding
@@ -109,7 +111,13 @@ except ImportError:
     from rectangular_block_encoding_reflection import (
         ReflectionRectangularBlockEncoding,
     )
+    from qroam_block_sizes import optimal_log_block_sizes_measured
     from state_prep_QROAM import _cap_log_block_sizes, _to_tuple_or_none
+
+try:
+    from .range_safe_qroam import emit_range_safety
+except ImportError:  # pragma: no cover
+    from range_safe_qroam import emit_range_safety
 
 if TYPE_CHECKING:
     from qualtran import AddControlledT
@@ -142,12 +150,13 @@ def optimal_diag_log_block_sizes(
     ``log2(L*)`` is distributed across dimensions (largest first), each capped by
     ``floor(log2(dim))``.
     """
-    caps = tuple(int(log2(max(1, int(d)))) for d in data_shape)
-    log_M = sum(caps)
-    log_b = int(log2(max(1, int(phase_bitsize))))
-    raw = log_M // 2 if adjoint else (log_M - log_b) // 2
-    total = max(0, min(raw, log_M))
-    return _distribute(total, caps)
+    # Exact brute force over the (small) grid.  The previous closed form floored
+    # ``log2`` of each dimension, so a non-power-of-two table was costed as if it were
+    # smaller -- which selected too small a Lambda and made LARGER tables come out
+    # CHEAPER (N_IP=224 -> 9046 but N_IP=256 -> 5686).  See qroam_block_sizes.
+    return optimal_log_block_sizes_measured(
+        tuple(int(d) for d in data_shape), (int(phase_bitsize),), adjoint=adjoint
+    )
 
 
 @attrs.frozen
@@ -188,21 +197,38 @@ class DiagonalCoulombKernelBlockEncoding(BlockEncoding):
         default=(0, 0, 0), converter=_to_tuple_or_none
     )
     optimal_T: bool = False
+    # The encoded diagonal entries are REAL.  W(r-r') is a real function, so the
+    # momentum-space kernel obeys zeta_{-Q} = conj(zeta_Q) and its transform
+    # zeta~_R = N_k^-1 sum_Q e^{iQR} zeta_Q is real.  Verified on the ISDF data with the
+    # correct 3-D mesh arithmetic: ||W[-Q] - conj(W[Q])||/max|W| = 1.7e-4 (2x2x2),
+    # 3.9e-8 (3x3x3), 1.7e-4 (4x4x4), and max|Im(zeta~)|/max|Re(zeta~)| = 3.7e-5, 8.3e-9,
+    # 8.3e-6 -- i.e. real to the ISDF fitting error.
+    #
+    # TRAP: a 1-D DFT over the LINEAR momentum index gives Im/Re ~ 0.25-0.77 and looks
+    # emphatically complex.  It is wrong -- the -Q partner is per-axis on the 3-D mesh
+    # and linear-index negation does not find it.  An earlier pass here drew exactly that
+    # false conclusion and doubled this bloq's word and rotation count.
+    #
+    # Real => one rotation, a b-bit word, AND Z R_y stays an involution, so the
+    # ov-direct / oo / vv templates keep their free self-inverseness.
+    complex_data: bool = False
 
     def __attrs_post_init__(self):
         if self.optimal_T:
             if is_symbolic(self.N_k, self.N_IP, self.phase_bitsize):
                 raise ValueError("optimal_T=True requires concrete N_k, N_IP, phase_bitsize")
             shape = self.diag_data_shape
+            # Size Lambda against the EFFECTIVE word: 2b for a complex entry.
+            word = 2 * int(self.phase_bitsize) if self.complex_data else int(self.phase_bitsize)
             object.__setattr__(
                 self,
                 'diag_log_block_sizes',
-                optimal_diag_log_block_sizes(shape, int(self.phase_bitsize), adjoint=False),
+                optimal_diag_log_block_sizes(shape, word, adjoint=False),
             )
             object.__setattr__(
                 self,
                 'diag_adjoint_log_block_sizes',
-                optimal_diag_log_block_sizes(shape, int(self.phase_bitsize), adjoint=True),
+                optimal_diag_log_block_sizes(shape, word, adjoint=True),
             )
 
     # ----------------------------- shape helpers -----------------------------
@@ -265,10 +291,22 @@ class DiagonalCoulombKernelBlockEncoding(BlockEncoding):
         return _cap_log_block_sizes(raw, _data_max_log_block_sizes(self.diag_data_shape))
 
     @property
+    def _diag_target_bitsizes(self) -> Tuple[SymbolicInt, ...]:
+        """One word: ``2b`` bits for a complex entry (magnitude angle + phase), ``b`` for real.
+
+        Carried as a single wide target rather than two ``b``-bit registers -- identical
+        for costing, and the data shape here is 3-D ``(N_k, N_IP, N_IP)`` so Qualtran's
+        one-array-per-target convention does not admit two.
+        """
+        if self.complex_data:
+            return (2 * self.phase_bitsize,)
+        return (self.phase_bitsize,)
+
+    @property
     def diag_qroam(self) -> QROAMClean:
         return QROAMClean.build_from_bitsize(
             self.diag_data_shape,
-            target_bitsizes=(self.phase_bitsize,),
+            target_bitsizes=self._diag_target_bitsizes,
             log_block_sizes=self._capped_lbs(self.diag_log_block_sizes),
         )
 
@@ -276,7 +314,7 @@ class DiagonalCoulombKernelBlockEncoding(BlockEncoding):
     def diag_qroam_adjoint(self) -> QROAMCleanAdjoint:
         adj_lbs = self._capped_lbs(self.diag_adjoint_log_block_sizes)
         fwd_lbs = self._capped_lbs(self.diag_log_block_sizes)
-        kwargs = dict(target_bitsizes=(self.phase_bitsize,), log_block_sizes=adj_lbs)
+        kwargs = dict(target_bitsizes=self._diag_target_bitsizes, log_block_sizes=adj_lbs)
         if fwd_lbs is not None:
             kwargs['target_shapes'] = (tuple(1 << b for b in fwd_lbs),)
         return QROAMCleanAdjoint.build_from_bitsize(self.diag_data_shape, **kwargs)
@@ -289,10 +327,13 @@ class DiagonalCoulombKernelBlockEncoding(BlockEncoding):
 
     def build_call_graph(self, ssa: "SympySymbolAllocator") -> "BloqCountDictT":
         ret: "Counter[Bloq]" = Counter()
-        ret[self.diag_qroam] += 1          # load angles theta_{Q,I,J}
-        ret[self.ctrl_phase_grad_add] += 1  # R_y(2 theta) on BE ancilla
-        ret[ZGate()] += 1                   # Z after R_y -> reflection on BE ancilla
-        ret[self.diag_qroam_adjoint] += 1   # uncompute angle register
+        ret[self.diag_qroam] += 1                    # load theta (and phi if complex)
+        emit_range_safety(ret, self.diag_data_shape)  # P-13: out-of-range -> |0>
+        # Magnitude rotation, plus a second rotation carrying the phase when the entry
+        # is complex.  One rotation is only correct for a real diagonal.
+        ret[self.ctrl_phase_grad_add] += 2 if self.complex_data else 1
+        ret[ZGate()] += 1                            # Z after R_y
+        ret[self.diag_qroam_adjoint] += 1            # uncompute the angle register
         return ret
 
     def get_ctrl_system(self, ctrl_spec: "CtrlSpec") -> "Tuple[Bloq, AddControlledT]":
@@ -346,9 +387,16 @@ class _ControlledDiagonalCoulombKernelBlockEncoding(BlockEncoding):
     def build_call_graph(self, ssa: "SympySymbolAllocator") -> "BloqCountDictT":
         b = self.inner.phase_bitsize
         ret: "Counter[Bloq]" = Counter()
+        # Controlling a QROAM-driven rotation costs +1 Toffoli, not a doubled rotation:
+        # the control is absorbed into the unary-iteration tree (measured: +1 exactly
+        # for every table size and shape).  With the load controlled off, the angle
+        # register stays |0>, so R_y(0) = I and the Hadamards cancel -- the rotations
+        # themselves need no control at all.
         ret[self.inner.diag_qroam] += 1
-        ret[AddIntoPhaseGrad(b, b).controlled().controlled()] += 1  # cc-Ry on BE ancilla
-        ret[ZGate().controlled()] += 1  # ctrl-Z reflection (identity when ctrl = 0)
+        ret[And()] += 1                                   # the control, on the load
+        emit_range_safety(ret, self.inner.diag_data_shape)
+        ret[AddIntoPhaseGrad(b, b).controlled()] += 1      # unchanged by the control
+        ret[ZGate().controlled()] += 1                     # Clifford, free
         ret[self.inner.diag_qroam_adjoint] += 1
         return ret
 
@@ -670,3 +718,4 @@ class _ControlledDirectCoulombBlockEncoding(BlockEncoding):
         # Central diagonal kernel is the main piece promoted to a controlled BE.
         ret[self.inner.C_diag.controlled()] += 1
         return ret
+

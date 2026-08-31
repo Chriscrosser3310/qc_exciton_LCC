@@ -1,0 +1,24 @@
+1. individual factors -- differences here are the scale gauge, not error
+   quantity                    jsun3          repro     ratio
+   xo_op                     9.07053        6.53101    0.7200
+   xv_op                     11.1871        8.11898    0.7257
+   xo_2inf                   3.34733          2.224    0.6644
+   xv_2inf                   7.06999        5.17355    0.7318
+   w_op_max               0.00148959      0.0056155    3.7698
+   w_fro_max              0.00761637       0.027218    3.5736
+
+2. scale-gauge check: X -> s X implies W -> W / s^4
+   s from ||X^o|| = 0.7199,  s from ||X^v|| = 0.7230
+   ||W|| ratio    = 3.5685   predicted 1/(s_o^2 s_v^2) = 3.6913
+
+3. what has to match
+   quantity                        jsun3          repro    rel diff
+   alpha_embed_op                 15.338        15.7889   2.940e-02
+   alpha_embed_op_mod            6.12591        6.41102   4.654e-02
+   alpha_lcu_dir                 29.6039        28.5808   3.456e-02
+   alpha_lcu_exch                183.097         180.06   1.659e-02
+
+   gauge-invariant Q=0 spectrum, top 6:
+     jsun3 [3.380217 1.506518 1.506479 1.506433 1.323982 1.248019]
+     repro [3.379677 1.506047 1.506007 1.505935 1.323424 1.247564]
+   rel L2 deviation over 130 singular values = 1.0127e-03

@@ -21,13 +21,21 @@ from qualtran.bloqs.arithmetic.addition import AddK
 from qualtran.bloqs.basic_gates import Discard, Hadamard, MeasureX, Toffoli
 from qualtran.bloqs.data_loading.qroam_clean import QROAMClean, QROAMCleanAdjoint
 from qualtran.bloqs.mcmt.specialized_ctrl import get_ctrl_system_1bit_cv_from_bloqs
+from qualtran.bloqs.mcmt import And
 from qualtran.bloqs.rotations.phase_gradient import AddIntoPhaseGrad
 from qualtran.symbolics import bit_length, is_symbolic, Shaped, SymbolicInt
 
 try:
     from .state_prep_QROAM import _cap_log_block_sizes, _to_tuple_or_none
+    from .phase_gradient_signed_rotation import SignedCtrlAddIntoPhaseGrad
 except ImportError:
     from state_prep_QROAM import _cap_log_block_sizes, _to_tuple_or_none
+    from phase_gradient_signed_rotation import SignedCtrlAddIntoPhaseGrad
+
+try:
+    from .range_safe_qroam import emit_range_safety
+except ImportError:  # pragma: no cover
+    from range_safe_qroam import emit_range_safety
 
 if TYPE_CHECKING:
     from qualtran import AddControlledT
@@ -120,8 +128,11 @@ class BlockInterferometerPhaseLayerQROAM(GateWithRegisters):
         if not is_symbolic(self.n_blocks):
             assert self.n_blocks >= 1
         if not is_symbolic(self.n_rows):
-            assert _positive_power_of_two(self.n_rows)
-            assert self.n_rows >= 2
+            # The layer pairs modes into n_rows//2 Givens blocks, so it needs an EVEN
+            # dimension -- not a power of two.  Requiring a power of two forced callers
+            # to pad (22 -> 32, 208 -> 256), which the analytic model does not do and
+            # which costs 1.3-1.8x per synthesis.
+            assert self.n_rows >= 2 and self.n_rows % 2 == 0
         if not is_symbolic(self.phase_bitsize):
             assert self.phase_bitsize > 1
 
@@ -201,8 +212,10 @@ class BlockInterferometerPhaseLayerQROAM(GateWithRegisters):
         alpha = qroam_out['target0_']
         beta = qroam_out['target1_']
 
-        # Apply R(α) H R(β) H on s: circuit order is H, ctrl-β, H, ctrl-α
-        ctrl_add = AddIntoPhaseGrad(self.phase_bitsize, self.phase_bitsize).controlled()
+        # Apply R(α) H R(β) H on s: circuit order is H, ctrl-β, H, ctrl-α.
+        # App. A of arXiv:2007.07391: the qubit control is Clifford (add<->subtract via
+        # two's complement), so the controlled rotation costs one uncontrolled add (b-2).
+        ctrl_add = SignedCtrlAddIntoPhaseGrad(self.phase_bitsize)
         s = bb.add(Hadamard(), q=s)
         s, beta, phase_grad = bb.add(ctrl_add, ctrl=s, x=beta, phase_grad=phase_grad)
         s = bb.add(Hadamard(), q=s)
@@ -227,7 +240,8 @@ class BlockInterferometerPhaseLayerQROAM(GateWithRegisters):
     def build_call_graph(self, ssa: "SympySymbolAllocator") -> "BloqCountDictT":
         ret: "Counter[Bloq]" = Counter()
         ret[self.qroam_bloq_for_cost] += 1
-        ret[AddIntoPhaseGrad(self.phase_bitsize, self.phase_bitsize).controlled()] += 2
+        emit_range_safety(ret, self.qroam_data_shape)   # P-13: out-of-range -> |0>
+        ret[SignedCtrlAddIntoPhaseGrad(self.phase_bitsize)] += 2   # App. A: b-2 each, not 2(b-1)
         ret[Hadamard()] += 2
         return ret
 
@@ -256,8 +270,15 @@ class _ControlledPhaseLayerQROAM(GateWithRegisters):
     def build_call_graph(self, ssa: "SympySymbolAllocator") -> "BloqCountDictT":
         b = self.inner.phase_bitsize
         ret: "Counter[Bloq]" = Counter()
+        # Controlling a QROAM-driven rotation costs +1 Toffoli, not a doubled rotation:
+        # the control is absorbed into the unary-iteration tree (measured: +1 exactly
+        # for every table size and shape).  With the load controlled off, the angle
+        # register stays |0>, so R_y(0) = I and the Hadamards cancel -- the rotations
+        # themselves need no control at all.
         ret[self.inner.qroam_bloq_for_cost] += 1
-        ret[AddIntoPhaseGrad(b, b).controlled().controlled()] += 2  # cc-add
+        ret[And()] += 1                                   # the control, on the load
+        emit_range_safety(ret, self.inner.qroam_data_shape)
+        ret[SignedCtrlAddIntoPhaseGrad(b)] += 2            # App. A (b-2); outer ctrl on the load only
         ret[Hadamard()] += 2
         return ret
 
@@ -385,6 +406,7 @@ class BlockInterferometerFinalPhasesQROAM(GateWithRegisters):
     def build_call_graph(self, ssa: "SympySymbolAllocator") -> "BloqCountDictT":
         ret: "Counter[Bloq]" = Counter()
         ret[self.qroam_bloq_for_cost] += 1
+        emit_range_safety(ret, self.qroam_data_shape)   # P-13
         ret[AddIntoPhaseGrad(self.phase_bitsize, self.phase_bitsize)] += 1
         ret[self.qroam_adj_bloq_for_cost] += 1
         return ret
@@ -413,8 +435,15 @@ class _ControlledFinalPhasesQROAM(GateWithRegisters):
     def build_call_graph(self, ssa: "SympySymbolAllocator") -> "BloqCountDictT":
         b = self.inner.phase_bitsize
         ret: "Counter[Bloq]" = Counter()
+        # Controlling a QROAM-driven rotation costs +1 Toffoli, not a doubled rotation:
+        # the control is absorbed into the unary-iteration tree (measured: +1 exactly
+        # for every table size and shape).  With the load controlled off, the angle
+        # register stays |0>, so R_y(0) = I and the Hadamards cancel -- the rotations
+        # themselves need no control at all.
         ret[self.inner.qroam_bloq_for_cost] += 1
-        ret[AddIntoPhaseGrad(b, b).controlled()] += 1
+        ret[And()] += 1                                   # the control, on the load
+        emit_range_safety(ret, self.inner.qroam_data_shape)
+        ret[AddIntoPhaseGrad(b, b)] += 1                   # unchanged by the control
         ret[self.inner.qroam_adj_bloq_for_cost] += 1
         return ret
 
@@ -747,11 +776,22 @@ def optimal_interferometer_log_block_sizes(
     ``final_adjoint_log_block_sizes``.
     """
     assert n_blocks >= 1
-    assert _positive_power_of_two(n_rows)
+    assert n_rows >= 2
     assert phase_bitsize > 0
-    lam = max(1.0, 0.5 * sqrt((n_blocks * n_rows) / phase_bitsize))
-    lam = 2 ** max(0, round(log2(lam)))
-    return split_interferometer_log_block_sizes(lam, n_blocks, n_rows)
+    # Exact brute force against the real phase-layer table: shape (n_blocks, n_rows//2)
+    # with a 2b-bit word (theta and phi -- the data is complex).  The previous closed
+    # form rounded log2(Lambda*) to an integer BEFORE splitting, which quantized so
+    # coarsely that doubling the table could leave Lambda unchanged and the per-layer
+    # cost flat (n_rows 64 -> 128 both gave 246).  It also required a power-of-two
+    # n_rows; the exact search does not.
+    try:
+        from .qroam_block_sizes import optimal_log_block_sizes_measured as _opt
+    except ImportError:
+        from qroam_block_sizes import optimal_log_block_sizes_measured as _opt
+    pair_rows = max(1, n_rows // 2)
+    # The phase layer is emitted n_rows times, so it is what must be optimal.
+    # Its table is (n_blocks, n_rows//2) with a 2b-bit word (theta AND phi: complex).
+    return _opt((n_blocks, pair_rows), (phase_bitsize, phase_bitsize))
 
 
 def split_interferometer_log_block_sizes(

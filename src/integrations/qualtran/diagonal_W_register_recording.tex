@@ -1,0 +1,94 @@
+\documentclass[11pt]{article}
+\usepackage[margin=0.95in]{geometry}
+\usepackage{amsmath,amssymb,booktabs,parskip}
+\usepackage[colorlinks=true,linkcolor=blue,urlcolor=blue]{hyperref}
+\newcommand{\code}[1]{\texttt{\small #1}}
+\newcommand{\ket}[1]{\lvert #1\rangle}
+\title{\vspace{-1.2cm}Register-recording for the diagonal $W$ under full space-group symmetry\\[2pt]
+\normalsize the general-symmetry analog of ``compute $R_1-R_2$''}
+\author{}\date{\today}
+\begin{document}\maketitle\vspace{-0.8cm}
+
+\section*{The analogy}
+\textbf{Translation only.} $W$ is dense but block-Toeplitz: $W_{\mu\nu}(R_1-R_2)$ depends on the
+\emph{relative cell}. To index it you record one number:
+\[
+   \ket{R_1,\mu}\ket{R_2,\nu}\ket{0} \;\longrightarrow\; \ket{R_1,\mu}\ket{R_2,\nu}\ket{R_1-R_2}.
+\]
+\textbf{Full space group.} $W$ is dense but constant on \emph{space-group orbits of pairs}:
+$W_{g\cdot a,\,g\cdot b}=W_{a,b}$. The unique data ($\sum_i n_i^2$ values) is addressed by the
+\textbf{canonical orbit representative} of the pair --- the ``generalized $R_1-R_2$.'' Recording it
+is the same idea plus a fold by the $|P|=48$ point ops.
+
+Grid point $(R,\mu)$ sits at $R+r_\mu$. An op $g=\{A_g\mid\tau_g\}$ acts by
+$g\!\cdot\!(R,\mu)=(A_g R+\ell_\mu(g),\,\pi_g(\mu))$, where $A_g r_\mu+\tau_g=r_{\pi_g(\mu)}+\ell_\mu(g)$
+defines the permutation $\pi_g=\mathrm{perm}[g,\cdot]$ and fold-back vector $\ell_\mu(g)$. On the
+translation-reduced triple $(\mu,R,\nu)$ (with $R$ the relative cell) a point op acts as
+\[
+   \boxed{\;g:\ (\mu,\,R,\,\nu)\ \longmapsto\ \big(\pi_g(\mu),\ \ A_g\!\cdot\!R+\ell_\nu(g)-\ell_\mu(g)\ (\mathrm{mod}\ \text{supercell}),\ \ \pi_g(\nu)\big)\;}
+\]
+
+\section*{Registers}
+\begin{tabular}{ll}
+$\ket{R_1}\ket{\mu}$ & co-density 1: cell $R_1$ ($\lceil\log_2 N_k\rceil$), interp.\ point $\mu$ ($\lceil\log_2 n_{\rm IP}\rceil$)\\
+$\ket{R_2}\ket{\nu}$ & co-density 2\\
+$\ket{\,\cdot\,}_\Delta$ & relative-cell register, holds $R=R_1-R_2$\\
+$\ket{\,\cdot\,}_g$ & coset-op register, $\lceil\log_2|P|\rceil=6$ qubits\\
+$\ket{\,\cdot\,}_\kappa$ & canonical-address register, holds the orbit rep $(\mu^\star,R^\star,\nu^\star)$\\
+$\ket{\,\cdot\,}_\phi$ & $b$-bit phase-gradient register (to apply $W$)\\
+\end{tabular}
+
+\section*{Step-by-step register state}
+
+\textbf{0. Initial.}
+\[ \ket{R_1,\mu;\,R_2,\nu}\ \ket{0}_\Delta\ket{0}_g\ket{0}_\kappa\ket{0}_\phi \]
+
+\textbf{1. Translation-reduce} --- the literal ``$R_1-R_2$'' step (a modular subtraction):
+\[ \longrightarrow\ \ket{R_1,\mu;\,R_2,\nu}\ \ket{R}_\Delta\ \ket{0}_g\ket{0}_\kappa\ket{0}_\phi,\qquad R=R_1-R_2. \]
+The translation-invariant content is now the triple $(\mu,R,\nu)$.
+
+\textbf{2. Point-group canonicalize} --- the new part (a select/reduce over the 48 ops).
+For each $g\in P$ form the image triple $T_g=\big(\pi_g\mu,\ A_gR+\ell_\nu(g)-\ell_\mu(g),\ \pi_g\nu\big)$
+(the boxed map; $\pi,\ell$ from the fixed $|P|\times n_{\rm IP}$ geometry QROM, $A_g$ a signed
+coordinate permutation --- nearly free), take the canonical (lexicographically minimal) $T_g$, write the
+achieving op into $\ket{}_g$ and the canonical triple into $\ket{}_\kappa$:
+\[ \longrightarrow\ \ket{R_1,\mu;\,R_2,\nu}\ \ket{R}_\Delta\ \ket{g^\star}_g\ \ket{\mu^\star,R^\star,\nu^\star}_\kappa\ \ket{0}_\phi. \]
+Now $\ket{}_\kappa$ holds the \textbf{space-group orbit representative} --- the unique-data address, the
+general-symmetry ``$R_1-R_2$.''
+
+\textbf{3. Load and apply $W$.} QROM addressed by $\ket{}_\kappa$ loads the one stored value $W(\kappa)$
+(table size $\sum_i n_i^2$); add its angle into $\ket{}_\phi$ to apply the diagonal coefficient
+$e^{\,i\,W(\kappa)}$ (phase-gradient), then uncompute the load:
+\[ \longrightarrow\ e^{\,iW(\kappa)}\;\ket{R_1,\mu;\,R_2,\nu}\ \ket{R}_\Delta\ \ket{g^\star}_g\ \ket{\kappa}_\kappa\ \ket{0}_\phi. \]
+
+\textbf{4. Uncompute the recording.} Reverse step 2 (same 48-op canonicalization) and step 1 (add $R$
+back), returning $\Delta,g,\kappa$ to $\ket{0}$:
+\[ \longrightarrow\ e^{\,iW(\kappa)}\;\ket{R_1,\mu;\,R_2,\nu}\ \ket{0}_\Delta\ket{0}_g\ket{0}_\kappa\ket{0}_\phi. \]
+Net: the diagonal $W$ applied on the pair, all work registers clean.
+
+\section*{Why it works / costs}
+$W(\kappa)$ is one value per orbit, and \emph{every} pair in the orbit maps to the same $\kappa$
+(pure permutation in real space $\Rightarrow$ no phase, $W(g\!\cdot\!a,g\!\cdot\!b)=W(a,b)$ exactly). So
+the reduced table has $\sum_i n_i^2$ entries and step 2 is exactly what routes each pair to its entry.
+
+\begin{center}\begin{tabular}{lll}
+\toprule
+ & translation only & full space group\\\midrule
+recorded quantity & $R_1-R_2$ (one lattice vector) & canonical orbit rep $(\mu^\star,R^\star,\nu^\star)$\\
+compute cost & subtraction, $O(\log N_k)$ & subtraction + 48-op canonicalize, $O(|P|\log N_k)$\\
+extra tables & --- & fixed $|P|\times n_{\rm IP}$ (perm, $\ell$), $n_k$-indep.\\
+$W$ table size & $N_k\, n_{\rm IP}^2$ & $\sum_i n_i^2$ (unique data)\\
+\bottomrule
+\end{tabular}\end{center}
+
+The only $N_k$-dependence is the $\log N_k$ register widths; $|P|=48$ is a crystal constant. The 48-op
+canonicalize is the ``register recording'' term in the BSE resource estimate ($\approx$ stage-B
+reconstruction). Everything is reversible: $\kappa=$ canon$(\mu,R,\nu)$ is a function of the inputs, so
+it is computed into ancilla and uncomputed after $W$ is applied.
+
+\section*{One subtlety}
+Nonabelian $\Rightarrow$ the orbit label is \emph{not} a plain difference: the point ops also permute
+the endpoint indices ($\mu,\nu\!\to\!\pi_g\mu,\pi_g\nu$) and fold cells ($\ell_\nu-\ell_\mu$). So step 2
+is a min over 48 images, not one subtraction --- but the recorded variable is still just the relative
+configuration of the two points, now reduced to the point-group fundamental wedge instead of one cell.
+\end{document}
