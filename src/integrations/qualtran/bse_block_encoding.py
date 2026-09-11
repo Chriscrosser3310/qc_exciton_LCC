@@ -30,12 +30,13 @@ template                matrix form                     primitives
 ======================  ==============================  ================================
 Fock (:math:`C_0`)      :math:`\mathcal U \mathcal D
                         \mathcal U^\dagger`             2 x eigendecomposition
-:math:`ov` exchange     :math:`M \mathcal Z M^\dagger`  2 x column isometry,
+:math:`ov` exchange     :math:`M \mathcal Z M^\dagger`  1 x column isometry + 1 inverse,
                                                         2 x load-all state prep,
                                                         1 x central (eigendec. / Frobenius)
 :math:`ov` direct       :math:`\mathcal X \Delta_\zeta
-                        \mathcal X^\dagger`             4 x column isometry, 1 x diagonal
-:math:`oo`, :math:`vv`  same as direct                  2 x column isometry (incremental)
+                        \mathcal X^\dagger`             2 x column isometry + 2 inverse,
+                                                        1 x diagonal
+:math:`oo`, :math:`vv`  same as direct                  2 x column isometry + 2 inverse
 ======================  ==============================  ================================
 
 In the exchange term each of :math:`\mu, \nu` must reach **both** particle registers, so
@@ -229,13 +230,15 @@ class ExchangeTemplate(BlockEncoding):
 
     Both :math:`\mu` (ket) and :math:`\nu` (bra) sit on **both** particle registers, so
     :math:`\zeta^V` survives as a genuine matrix and the central needs a matrix block
-    encoding.  Each index is consumed by an isometry on the hole side and kept alive by a
-    controlled state preparation on the electron side.
+    encoding.  Each index is consumed by an isometry on the nonprepared side and kept
+    alive by a controlled state preparation on the other.  Either species may take the
+    preparation role; ``prepared`` selects it.
 
     Components (matching the manuscript's count):
-      * 2 x column-by-column isometry synthesis -- the hole factors :math:`\chi^{V,o}`;
-      * 2 x load-all controlled state preparation -- the electron factors
-        :math:`\chi^{V,v}` (the ``2->inf`` norm side);
+      * 1 x column-by-column isometry synthesis and 1 x its exact inverse -- the
+        nonprepared factors :math:`\chi^{V,s}`;
+      * 2 x load-all controlled state preparation -- the prepared factors
+        :math:`\chi^{V,s'}` (the ``2->inf`` norm side);
       * 1 x central :math:`\zeta^V_Q`: **eigendecomposition** (operator norm, and a
         congruence so self-inverse for free) or the **Hermitian Frobenius** alternative
         (larger :math:`\lambda`, more aggressive space-Toffoli tradeoff, and needs the
@@ -245,9 +248,10 @@ class ExchangeTemplate(BlockEncoding):
         \ominus\mathbf Q\rangle)\langle \mathbf Q|` and its adjoint -- isometries, so no
         extra subnormalization.
 
-    :math:`\lambda_{ov}^{\mathrm{ex}} = 2\,\lVert\chi^{V,o}\rVert^2\,
-    \lVert\chi^{V,v}\rVert_{2\to\infty}^2\,\lVert\zeta^V\rVert_*`; the 2 is the operator
-    norm of the pair-spin operator.
+    :math:`\lambda_{ov}^{\mathrm{ex}} = 2\,\lVert\chi^{V,s}\rVert^2\,
+    \lVert\chi^{V,s'}\rVert_{2\to\infty}^2\,\lVert\zeta^V\rVert_*` for the
+    synthesized species :math:`s` and the prepared species :math:`s'`; the 2 is the
+    operator norm of the pair-spin operator.
     """
 
     N_o: SymbolicInt
@@ -272,8 +276,17 @@ class ExchangeTemplate(BlockEncoding):
     #: Measured: dilation is 0.91-0.94x the SVD route, the gap being the separate V
     #: synthesis (20,518 Toffoli at M=22, N_k=216).  Same subnormalization either way.
     chi_embedding: str = "dilation"
+    #: Which species uses load-all state preparation, ``"v"`` or ``"o"``.  The other
+    #: species is synthesized as a column isometry.  Both choices are complete
+    #: operator-norm circuits; they differ in cost and in subnormalization, so the
+    #: choice belongs to the caller.  Preparing the occupied species shrinks the
+    #: preparation tree from 32 to 4 amplitudes and enlarges the synthesized factor
+    #: from N_o to N_v columns.
+    prepared: str = "v"
 
     def __attrs_post_init__(self):
+        if self.prepared not in ("o", "v"):
+            raise ValueError(f"prepared must be 'o' or 'v', got {self.prepared!r}")
         if self.central not in ("eigendecomposition", "frobenius"):
             raise ValueError(
                 f"central must be 'eigendecomposition' or 'frobenius', got {self.central!r}"
@@ -294,6 +307,11 @@ class ExchangeTemplate(BlockEncoding):
         return self.N_IP
 
     @cached_property
+    def synthesized(self) -> str:
+        """The species whose factor is synthesized: the one not state prepared."""
+        return "o" if self.prepared == "v" else "v"
+
+    @cached_property
     def n_rows_occ(self) -> SymbolicInt:
         return self.N_o
 
@@ -304,9 +322,15 @@ class ExchangeTemplate(BlockEncoding):
     # -------------------------------- sub-bloqs --------------------------------
 
     @cached_property
-    def hole_isometry(self) -> ColumnIsometryRectangularBlockEncoding:
-        r"""``chi^{V,o}``: an ``N_o x N_THC`` isometry, k-multiplexed, column-by-column."""
-        m = min(int(self.N_o), int(self.N_IP))
+    def factor_isometry(self) -> ColumnIsometryRectangularBlockEncoding:
+        r"""``chi^{V,s}`` for the **nonprepared** species ``s``, column-by-column.
+
+        At ``prepared="v"`` this is the occupied hole factor, an ``N_o x N_THC``
+        isometry; at ``prepared="o"`` it is the virtual electron factor, which is
+        far larger.  Either species may be state prepared, and the choice moves
+        cost between this synthesis and the load-all preparation below.
+        """
+        m = min(int(self.N_o if self.synthesized == "o" else self.N_v), int(self.N_IP))
         n_rows = int(self.n_rows_thc) + (m if self.chi_embedding == "dilation" else 0)
         return ColumnIsometryRectangularBlockEncoding(
             n_blocks=self.N_k,
@@ -318,11 +342,18 @@ class ExchangeTemplate(BlockEncoding):
         )
 
     @cached_property
-    def electron_state_prep(self) -> LoadAllStatePreparationQROAM:
-        r"""``chi^{V,v}``: the ``mu``-indexed family of virtual-side states, load-all."""
+    def prepared_state_prep(self) -> LoadAllStatePreparationQROAM:
+        r"""``chi^{V,s}`` for the **prepared** species ``s``, load-all.
+
+        Its ``2->inf`` norm sets the column scale, and its rotation tree is padded
+        to a power of two.  Preparing the occupied species gives a four-amplitude
+        tree instead of a twenty-two-amplitude one, so this child shrinks sharply
+        while :attr:`factor_isometry` grows.
+        """
         return LoadAllStatePreparationQROAM(
             n_addr=self.N_k * self.N_IP,
-            n_rows=_pow2(self.n_rows_virt),   # rotation tree: zero-padded state
+            n_rows=_pow2(self.n_rows_virt if self.prepared == "v"
+                         else self.n_rows_occ),   # rotation tree: zero-padded state
             phase_bitsize=self.phase_bitsize,
             real_data=self.real_data,
         )
@@ -355,6 +386,32 @@ class ExchangeTemplate(BlockEncoding):
         )
 
     @cached_property
+    def factor_isometry_inverse(self) -> ColumnIsometryRectangularBlockEncoding:
+        r"""The exact inverse ``(chi^{V,s})^dag``, which is **not** the forward cost.
+
+        Forward synthesis defers each Givens layer's measurement sign into that column's
+        later phase table; the annihilator cannot, because the shrinking multiplex leaves
+        the phase on qubits the next layer rotates rather than controls on.  So the inverse
+        pays an explicit erasure per layer.  Charging the forward proxy on both legs
+        understates the congruence.
+        """
+        return attrs.evolve(self.factor_isometry, inverse=True)
+
+    # Names kept from the virtual-SP-only version.  They follow the SP choice, so
+    # at ``prepared="o"`` the "hole" isometry is in fact the virtual factor.
+    @property
+    def hole_isometry(self) -> ColumnIsometryRectangularBlockEncoding:
+        return self.factor_isometry
+
+    @property
+    def hole_isometry_inverse(self) -> ColumnIsometryRectangularBlockEncoding:
+        return self.factor_isometry_inverse
+
+    @property
+    def electron_state_prep(self) -> LoadAllStatePreparationQROAM:
+        return self.prepared_state_prep
+
+    @cached_property
     def momentum_prep(self) -> Bloq:
         """The ``N_k^{-1/2} sum_{k,Q}`` isometry's uniform superposition over k."""
         return PrepareUniformSuperposition(n=self.N_k)
@@ -374,9 +431,9 @@ class ExchangeTemplate(BlockEncoding):
     @cached_property
     def ancilla_bitsize(self) -> SymbolicInt:
         return (
-            self.hole_isometry.ancilla_bitsize
+            self.factor_isometry.ancilla_bitsize
             + self.central_BE.ancilla_bitsize
-            + 2 * bit_length(int(self.hole_isometry.n_rows) - 1)  # mu, nu (dilated)
+            + 2 * bit_length(int(self.factor_isometry.n_rows) - 1)  # mu, nu (dilated)
             + self.k_bitsize                        # the Q register
             + 2                                     # the two spin qubits
         )
@@ -416,10 +473,14 @@ class ExchangeTemplate(BlockEncoding):
         lookup**, independent of table size, and additive with the P-13 range-safety
         surcharge.  Not worth relying on a cancellation argument to save.
         """
-        iso = self.hole_isometry.controlled() if controlled else self.hole_isometry
-        sp_f = self.electron_state_prep
-        sp_i = self.electron_state_prep.adjoint()
-        ret[iso] += 2                                        # mu and nu, hole side
+        iso_f = self.factor_isometry
+        iso_i = self.factor_isometry_inverse
+        if controlled:
+            iso_f, iso_i = iso_f.controlled(), iso_i.controlled()
+        sp_f = self.prepared_state_prep
+        sp_i = self.prepared_state_prep.adjoint()
+        ret[iso_f] += 1                        # mu, nonprepared side (forward)
+        ret[iso_i] += 1                        # nu, nonprepared side (exact inverse)
         ret[sp_f.controlled() if controlled else sp_f] += 1   # S_chi   (mu)
         ret[sp_i.controlled() if controlled else sp_i] += 1   # S_chi^dag (nu)
         ret[self.central_BE.controlled() if controlled else self.central_BE] += 1
@@ -633,8 +694,12 @@ class ExchangeDensityFittingTemplate(BlockEncoding):
 
     def _calls(self, ret: "Counter[Bloq]", *, controlled: bool) -> None:
         """``L`` and its inverse, plus the SVD pieces and the momentum subtraction."""
-        iso = self.L_isometry
-        ret[iso.controlled() if controlled and hasattr(iso, 'controlled') else iso] += 2
+        iso_f = self.L_isometry
+        iso_i = attrs.evolve(self.L_isometry, inverse=True)
+        if controlled and hasattr(iso_f, 'controlled'):
+            iso_f, iso_i = iso_f.controlled(), iso_i.controlled()
+        ret[iso_f] += 1                                         # L
+        ret[iso_i] += 1                                         # L^dag, at the inverse cost
         if self.chi_embedding == "svd":
             # Sigma and V on BOTH sides: the modular subtraction between L and L^dag
             # rewrites the multiplexer address, so nothing telescopes.  See sv_unitary.
@@ -681,7 +746,7 @@ class DirectTemplate(BlockEncoding):
     block diagonal in :math:`(\mathbf R_1,\mathbf R_2)` with entry
     :math:`\tilde\zeta^W_{\mathbf R_1 \ominus \mathbf R_2}` and no residual :math:`N_k`.
 
-    Components: 4 x column isometry + 1 x diagonal block encoding, plus the (lower-order)
+    Components: 2 x column isometry + 2 x its exact inverse + 1 x diagonal block encoding, plus the (lower-order)
     Fourier transforms and modular adder.  ``same_spin`` marks the ``oo`` / ``vv``
     siblings, which share :math:`\zeta^W` and two :math:`\chi` factors with this template
     and therefore contribute only **2** additional isometries each.
@@ -829,9 +894,17 @@ class DirectTemplate(BlockEncoding):
         # subtraction, exactly as before.  The previous code built ov-direct first and made
         # oo / vv incremental at two isometries each; both orders give the same C_walk.
         # No primitive is constructed, resized or retuned by this choice.
+        #
+        # Each screened term is the congruence ``(X (x) X) Delta (X (x) X)^dag``, so its
+        # four legs are TWO forward factors -- one per particle register -- and TWO exact
+        # inverses, never four forward ones.  The two directions do not cost the same: the
+        # annihilator must erase each Givens layer explicitly, while forward synthesis
+        # defers those signs into the column's phase table.
         if self.same_spin is not None:
             iso = self.occ_isometry if self.same_spin == "oo" else self.virt_isometry
-            ret[iso.controlled() if controlled else iso] += 4
+            iso_inv = attrs.evolve(iso, inverse=True)
+            ret[iso.controlled() if controlled else iso] += 2
+            ret[iso_inv.controlled() if controlled else iso_inv] += 2
             if self.same_spin == "oo":
                 ret[self.diagonal_central.controlled() if controlled
                     else self.diagonal_central] += 1
@@ -940,8 +1013,13 @@ class BSEBlockEncoding(BlockEncoding):
     lambda_vv: SymbolicFloat = 1.0
     lambda_ov_ex: SymbolicFloat = 1.0
     lambda_ov_dir: SymbolicFloat = 1.0
+    #: Which exchange species uses load-all state preparation, ``"v"`` or ``"o"``.
+    exchange_prepared: str = "v"
 
     def __attrs_post_init__(self):
+        if self.exchange_prepared not in ("o", "v"):
+            raise ValueError(
+                f"exchange_prepared must be 'o' or 'v', got {self.exchange_prepared!r}")
         for name in ("m", "N_o", "N_v", "N_IP", "N_k"):
             v = getattr(self, name)
             if not is_symbolic(v) and int(v) < 1:
@@ -996,7 +1074,7 @@ class BSEBlockEncoding(BlockEncoding):
             N_o=self.N_o, N_v=self.N_v, N_IP=self.N_IP, N_k=self.N_k,
             phase_bitsize=self.phase_bitsize, optimal_T=self.optimal_T,
             central=self.exchange_central, alpha_val=self.lambda_ov_ex,
-            real_data=self.real_data,
+            real_data=self.real_data, prepared=self.exchange_prepared,
         )
 
     @cached_property

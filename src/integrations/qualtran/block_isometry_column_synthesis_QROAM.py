@@ -1,4 +1,14 @@
-r"""Column-by-column isometry synthesis (Iten et al.) with Berry et al. Eq.-24 QROAM layers.
+r"""Column-by-column isometry synthesis and its legacy resource proxies.
+
+The default ``scheme='phase-first'`` uses a fixed rounded reference and one
+classical diagonal sign frame across all columns, in both directions. Every
+lookup's selected and unused words are measured after use, and one final
+full-address correction closes the frame. ``reference_from_isometries`` returns
+the executable dense reference; ``build_call_graph`` uses the same aligned
+padded layout, with explicit joint lower/upper lookup windows and widths.
+The adaptive dynamic-ROM hardware decomposition is not implemented.
+
+The description below concerns the separate legacy ``scheme='iten'`` path.
 
 This synthesizes an ``m -> n`` isometry (a ``2^n x K`` matrix with orthonormal columns,
 ``K <= N = 2^n``) using the **column-by-column** decomposition of
@@ -42,7 +52,7 @@ A read-only ``block`` register makes this block-diagonal (``sum_j |j><j| (x) V_j
 QROAM lookup exactly like the sibling ``BlockUnitary*QROAM`` bloqs; ``n_blocks = 1`` is the plain
 single-isometry case.
 
-The class is a *resource model*: ``build_composite_bloq`` lays out the real gate structure with
+For the legacy padded Iten path, ``build_composite_bloq`` lays out gate structure with
 shape-only (data-free) QROAM, and ``build_call_graph`` gives the aggregate Toffoli/qubit cost.  The
 module-level numpy helpers (:func:`eq24_angles`, :func:`column_by_column_disentangler`) provide a
 standalone reference proving the algorithm reproduces the isometry (``G V = I_{2^n x K}``).
@@ -72,6 +82,7 @@ from qualtran import (
     SoquetT,
 )
 from qualtran.bloqs.basic_gates import Hadamard
+from qualtran.bloqs.basic_gates.x_basis import MeasureX
 from qualtran.bloqs.block_encoding import BlockEncoding
 from qualtran.bloqs.block_encoding.lcu_block_encoding import PrepareIdentity
 from qualtran.bloqs.data_loading.qroam_clean import QROAMClean, QROAMCleanAdjoint
@@ -511,67 +522,22 @@ class BlockIsometryColumnSynthesisQROAM(GateWithRegisters):
     # measurement with the sign fix-up folded into the next layer's classical data, the
     # convention the phase layers already use) or charged explicitly.
     absorb_mcg_erasure: bool = True
-    # Whether every column charges the FULL 2^(c+1) prefix range at each layer, or only
-    # the live nodes of its own P-07 rotation tree.
-    #
-    # Column ``j`` has support on ``d = n_rows - j`` entries, so its tree level ``s`` holds
-    # ``max(0, min(2^s, d - 2^s))`` nodes -- the top level truncated by ``d - 2^s``.  The
-    # padded form assumes every level is full, which charges ``~2^n`` per column instead of
-    # ``~d``.  Total rotations are then ``M(N-1) - M(M-1)/2`` (P-07, executed: random
-    # complex isometries reduced to the identity embedding with residual <= 9e-16 at
-    # non-power-of-two N), against ``M(2^n - 1)`` padded.  At n_rows=130, n_cols=22 that
-    # is 2607 against 5610, a 2.15x overcharge; at 208 it is 1.30x and at 256 it is 1.04x.
-    #
-    # WARNING: ``build_composite_bloq`` and ``_column_op`` below still implement the
-    # PADDED elimination order, which spends ~2x the angles of the P-07 construction.  So
-    # with the default the cost model and the in-module decomposition disagree, and the
-    # decomposition is the one that is wrong.  Reconciling them means replacing
-    # ``_column_op`` with the P-07 order, which needs its own numerical verification.
+    # Legacy 'iten' table-padding option. The phase-first path always uses
+    # its aligned padded reference geometry and literal joint-address lookups.
     pad_layer_tables: bool = False
-    # Whether this instance is the INVERSE isometry V^dagger rather than the forward V.
-    #
-    # Every phase layer erases its angle register by X-basis measurement, which leaves an
-    # address-dependent +-1 phase.  Whether that phase is free depends entirely on the
-    # direction, and the reason is the staircase:
-    #
-    #   FORWARD -- the multiplex grows.  Qubit 1 is rotated unmultiplexed, qubit 2 is
-    #   multiplexed by qubit 1, qubit 3 by qubits 1-2, ..., and the last layer is a phase
-    #   layer multiplexed by all n qubits.  So the phase left by layer t is diagonal on a
-    #   SUBSET of the qubits that layer t+1 multiplexes on.  A diagonal on control qubits
-    #   commutes through a gate controlled by those qubits, so it commutes trivially, and
-    #   every phase can be pushed to the final all-qubit phase layer and absorbed into its
-    #   classical data.  Cost of erasure: zero.
-    #
-    #   INVERSE -- the multiplex shrinks.  Now the phase left by layer t is diagonal on
-    #   qubits that layer t+1 ROTATES, not qubits it controls on.  A diagonal does not
-    #   commute through a rotation on the same qubit, so it cannot be deferred: each layer
-    #   must pay its own explicit measurement-based uncomputation.
-    #
-    # So the inverse charges one QROAMCleanAdjoint per phase layer, over that layer's own
-    # (n_blocks, n_s) table.  It is measurement-based, hence independent of the word width,
-    # which is why the penalty is a b-free term.  Same argument kills the
-    # ``absorb_mcg_erasure`` premise, so the inverse charges those explicitly too.
-    #
-    # Effect (n_blocks=216, b=20): at Q-optimal the inverse is ~2x the forward, since
-    # compute and uncompute are equal halves at Lambda=1.  At T-optimal the leading
-    # ``sqrt(b)`` term is unchanged and a b-free term appears, ~5 M sqrt(N N_k).
+    # phase-first: reverse the same rounded reference gates; both directions
+    # measure every lookup word, propagate D=diag(d_j) by theta -> d_x*d_y*theta,
+    # and apply one final full-address sign correction. This does not change the
+    # separate legacy 'iten' scheme's erasure policy.
     inverse: bool = False
     # Which construction the cost model charges.
     #
-    # 'phase-first' (author's scheme, 2026-08-23; DEFAULT) -- per column: one diagonal phase
-    # layer over N entries making the column real, then n real R_y sublayers, sublayer s
-    # multiplex-controlled on the leading n-s qubits and multi-controlled on the trailing
-    # s-1 qubits at f = c mod 2^(s-1).  Tables are ceil(N/2^s), word b (ONE real angle).
-    # NO multi-controlled fix-up gates are needed: whenever a pair contains an index below c
-    # the entry to be zeroed is already zero, since column c is orthogonal to e_0..e_{c-1},
-    # so the Givens angle is 0 and the gate is the identity.
-    #
-    # Amplitude does transiently leave the physical range when N is not a power of two -- a
-    # sublayer's surviving side can sit above N -- but the destination is always the *keep*
-    # side, hence inside the next sublayer's congruence class, so a later sublayer always has
-    # an address for it.  That is why ceil(N/2^s) suffices and no range gymnastics are needed.
-    # Verified: 39/39 random complex isometries reduced to the identity embedding at residual
-    # ~1e-16, n_phys in {21,26,30,37,45,50,60,128,130,208}, no fix-ups.
+    # 'phase-first' (default): per column, a phase lookup over the padded row
+    # register followed by the live levels of the fixed aligned Givens tree.
+    # Every rotation-angle lookup addresses all bits except its target, including the
+    # block register and the fixed lower bits. Nonmatching lower bits load 0;
+    # no additional low-bit-controlled rotation or separate And ladder is used.
+    # Padding is needed because earlier columns can move later columns into it.
     #
     # 'iten' -- the older column-by-column path: general two-level gates, 2b-wide two-angle
     # tables, and num_mcgs() Lemma-11 fix-ups.  Kept for comparison; ~2x dearer.
@@ -771,7 +737,10 @@ class BlockIsometryColumnSynthesisQROAM(GateWithRegisters):
             (self.n_blocks,), target_bitsizes=(word,), log_block_sizes=lbs)
 
     def _real_sweep_layer(self, table_rows: int):
-        """One real-R_y sublayer: ``(n_blocks, table_rows)`` of single ``b``-bit angles."""
+        """Historical upper-only sublayer, retained for cost comparisons.
+
+        The default graph uses ``joint_synthesis`` instead.
+        """
         b = int(self.phase_bitsize)
         # One b-bit angle per address, so the interferometer helper (sized for two-angle
         # tables) is the wrong optimum here; ask the counter directly.
@@ -788,7 +757,7 @@ class BlockIsometryColumnSynthesisQROAM(GateWithRegisters):
             phase_bitsize=self.phase_bitsize, log_block_sizes=lbs)
 
     def _column_diagonal(self):
-        """The per-column diagonal phase layer: ``(n_blocks, N)`` single ``b``-bit angles."""
+        """Historical unpadded phase child, retained for cost comparisons."""
         b = int(self.phase_bitsize)
         if self.optimal_T:
             try:
@@ -905,52 +874,11 @@ class BlockIsometryColumnSynthesisQROAM(GateWithRegisters):
         K = int(self.n_cols)
         n = int(self.system_bitsize)
         if self.scheme == 'phase-first':
-            # Author's scheme.  Per column: one diagonal phase layer over N, then n real
-            # R_y sublayers of ceil(N/2^s).  No fix-up gates.  Forward defers every erasure
-            # into one final phase layer; the inverse pays each one immediately, because its
-            # staircase decreases and the measurement sign lands on a qubit a later
-            # sublayer rotates rather than on one it controls.
-            # WHAT EACH SUB-BLOQ ALREADY CHARGES -- read before adding anything here.
-            #   BlockInterferometerFinalPhasesQROAM (the diagonal): its QROAM, P-13 range
-            #     safety, one AddIntoPhaseGrad, AND its own measurement-based adjoint.  So
-            #     the one-erasure-per-column is already paid; do not add one.
-            #   RealPhaseLayerQROAM (a sublayer): its QROAM, P-13 range safety, one
-            #     SignedCtrlAddIntoPhaseGrad (b-2), two Hadamards.  Range safety is already
-            #     paid; do not add one.
-            #   QROAMCleanAdjoint: itself only.
-            # Only the trailing-qubit AND ladders and the inverse's sublayer erasures are
-            # genuinely ours to emit.
-            #
-            # NOTE RealPhaseLayerQROAM is a COST PROXY, not a structural match: it is named
-            # for an adjacent-pair beamsplitter layer over the whole register with no
-            # multi-control, whereas our sublayer pairs are strided by 2^s and are
-            # multi-controlled on the trailing s-1 qubits.  Table shape, word width and
-            # rotation count coincide, so the Toffoli count is right; the routing is not
-            # what the class name says.
-            sizes = sublayer_sizes(int(self.n_rows))
-            for _ in range(K):
-                ret[self._column_diagonal()] += 1
-                # Every diagonal owes exactly ONE erasure per column, in both
-                # directions -- and BlockInterferometerFinalPhasesQROAM already charges it
-                # internally (its build_call_graph emits qroam_adj_bloq_for_cost).  So
-                # nothing extra is added here; an explicit erasure on top was double
-                # charging, worth ~12% of the T-optimal forward.
-                #
-                # Sublayer signs are the only ones that differ by direction.  A sublayer
-                # sign is a function of that layer's multiplex address.  Forward the address
-                # GROWS, so the sign is a function of a subset of the next layer's address
-                # and is absorbed into its classical angle data for free (a +-1 on the
-                # target flips the angle sign, R_y(t) diag(-1,1) = diag(-1,1) R_y(-t); a
-                # +-1 on the controls commutes).  Inverse the address SHRINKS, so the sign
-                # depends on more bits than the next layer's address has and cannot be
-                # absorbed -- hence one explicit erasure per sublayer below.
-                for s_idx, size in enumerate(sizes, start=1):
-                    ret[self._real_sweep_layer(size)] += 1
-                    if s_idx >= 3:                 # AND ladder for the trailing controls
-                        ret[And()] += s_idx - 2     # (f is classical: X gates are free)
-                    if self.inverse:
-                        ret[self._sweep_erasure(size)] += 1
-            return ret
+            # The block and local-row wires concatenate to the same aligned
+            # physical register as these equal-capacity fused blocks. Share
+            # their literal joint low/upper-address lookup graph, not the old
+            # upper-only RealPhaseLayer plus separate And controls.
+            return self.joint_synthesis.build_call_graph(ssa)
 
         if self.pad_layer_tables:
             for c in self._control_counts():
@@ -976,7 +904,72 @@ class BlockIsometryColumnSynthesisQROAM(GateWithRegisters):
         ret[self.final_phase_layer] += 1
         return ret
 
+    @cached_property
+    def joint_synthesis(self):
+        """The same aligned tree and full padded phase support as the reference.
+
+        Each remaining-bit lookup includes the block bits and both the lower
+        and upper local bits. Explicit old per-axis block-size settings map to
+        their total log size in this flattened lookup. ``None`` or optimal_T
+        selects each compute's optimum, with the lower bits kept in Select.
+        The final sign correction retains its own independent optimum.
+        """
+        try:
+            from .primitives.isometry import FusedColumnIsometry
+        except ImportError:
+            from primitives.isometry import FusedColumnIsometry
+        if is_symbolic(self.n_blocks, self.n_rows, self.n_cols, self.phase_bitsize):
+            raise DecomposeTypeError("joint isometry lookups require concrete dimensions")
+        def flattened_log(values):
+            return None if self.optimal_T or values is None else sum(int(v) for v in values)
+        return FusedColumnIsometry(
+            blocks=((int(self.n_rows), int(self.n_cols)),) * int(self.n_blocks),
+            phase_bits=int(self.phase_bitsize), forward=not self.inverse,
+            rotation_log_block_size=flattened_log(self.log_block_sizes),
+            phase_log_block_size=flattened_log(self.final_log_block_sizes))
+
+    @staticmethod
+    def _lookup_output_bits(lookup) -> int:
+        """Used angle plus *all* unused clean-QROAM output words."""
+        words = 1
+        for exponent in lookup.log_block_sizes:
+            words *= 1 << int(exponent)
+        return words * sum(int(b) for b in lookup.target_bitsizes)
+
+    @cached_property
+    def final_sign_correction(self):
+        return self.joint_synthesis.final_sign_correction
+
+    def adjoint(self):
+        if self.scheme != 'phase-first':
+            return super().adjoint()
+        return attrs.evolve(self, inverse=not self.inverse)
+
+    def reference_from_isometries(self, isometries):
+        """Concrete fixed gates on the same aligned padded layout as the cost graph.
+
+        The dynamic-ROM hardware decomposition is still separate from this
+        dense reference and from the shape-only resource graph.
+        """
+        try:
+            from .isometry_sign_frame import compile_isometry_reference
+        except ImportError:
+            from isometry_sign_frame import compile_isometry_reference
+        if self.scheme != 'phase-first':
+            raise ValueError("sign-frame reference requires scheme='phase-first'")
+        if len(isometries) != self.n_blocks or any(
+                v.shape != (self.n_rows, self.n_cols) for v in isometries):
+            raise ValueError("matrix shapes do not match the resource specification")
+        return compile_isometry_reference(isometries, bits=int(self.phase_bitsize),
+                                           layout="indexed")
+
     def build_composite_bloq(self, bb: BloqBuilder, **soqs: SoquetT) -> Dict[str, SoquetT]:
+        if self.scheme == 'phase-first':
+            raise DecomposeTypeError(
+                "The adaptive phase-first graph is a resource model. Use "
+                "reference_from_isometries for full-unitary sign-frame execution; "
+                "a dynamic-ROM hardware decomposition is not implemented."
+            )
         if is_symbolic(self.n_blocks, self.n_rows, self.n_cols, self.phase_bitsize):
             raise DecomposeTypeError(f"cannot decompose data-free symbolic {self}")
         n = int(self.system_bitsize)
@@ -1074,11 +1067,10 @@ class BlockIsometryColumnSynthesisQROAM(GateWithRegisters):
 class _ControlledBlockIsometryColumnSynthesisQROAM(GateWithRegisters):
     """Singly-controlled :class:`BlockIsometryColumnSynthesisQROAM`.
 
-    The external control reaches only the phase-gradient additions inside every layer (and one extra
-    control on each multi-controlled gate); QROAM loads, Hadamards, and measurement-based erasures stay
-    uncontrolled because they self-cancel (or are identity) when the control is 0.  The overhead is
-    therefore a single extra control bit per ``AddIntoPhaseGrad`` -- ~0 Toffoli relative to the bare
-    construction.
+    For phase-first synthesis, the external control reaches the joint lookups
+    and final sign correction. Off-control words are zero, so the phase-gradient
+    additions need no extra control. The legacy Iten path still controls its
+    additions and multi-controlled rotations separately.
     """
 
     inner: BlockIsometryColumnSynthesisQROAM
@@ -1087,10 +1079,22 @@ class _ControlledBlockIsometryColumnSynthesisQROAM(GateWithRegisters):
     def signature(self) -> Signature:
         return Signature([Register('ctrl', QBit()), *self.inner.signature])
 
+    def adjoint(self):
+        if self.inner.scheme != 'phase-first':
+            return super().adjoint()
+        # Reverse the fixed reference, then run fresh measurements. Taking the
+        # adjoint of the measurement leaves themselves is not this protocol.
+        return attrs.evolve(self, inner=self.inner.adjoint())
+
     def build_call_graph(self, ssa: 'SympySymbolAllocator') -> 'BloqCountDictT':
         ret: 'Counter[Bloq]' = Counter()
         if is_symbolic(self.inner.n_rows, self.inner.n_cols):
             raise DecomposeTypeError(f"cannot enumerate layers for symbolic {self.inner}")
+        if self.inner.scheme == 'phase-first':
+            # Conditional lookup words are zero with ctrl off. Thus P-05 itself
+            # stays uncontrolled; the final sign fixup uses the same control.
+            return attrs.evolve(self.inner.joint_synthesis,
+                                external_control=True).build_call_graph(ssa)
         K = int(self.inner.n_cols)
         n = int(self.inner.system_bitsize)
         for c in self.inner._control_counts():
@@ -1173,6 +1177,11 @@ class ColumnIsometryRectangularBlockEncoding(BlockEncoding):
     inverse: bool = False
     # See ``BlockIsometryColumnSynthesisQROAM.scheme``.
     scheme: str = 'phase-first'
+
+    def adjoint(self):
+        if self.scheme != 'phase-first':
+            return super().adjoint()
+        return attrs.evolve(self, inverse=not self.inverse)
 
     @property
     def block_bitsize(self) -> SymbolicInt:
@@ -1288,12 +1297,16 @@ class ColumnIsometryRectangularBlockEncoding(BlockEncoding):
 class _ControlledColumnIsometryRectangularBlockEncoding(BlockEncoding):
     """Singly-controlled :class:`ColumnIsometryRectangularBlockEncoding`.
 
-    Promotes only the column synthesizer to its controlled variant (the external
-    control reaches the phase-gradient additions inside each layer); the spectator
-    ancilla and register surgery are unchanged.
+    Promotes the column synthesizer to its controlled variant, including the
+    phase-first joint lookups and final sign correction.
     """
 
     inner: "ColumnIsometryRectangularBlockEncoding"
+
+    def adjoint(self):
+        if self.inner.scheme != 'phase-first':
+            return super().adjoint()
+        return attrs.evolve(self, inner=self.inner.adjoint())
 
     @cached_property
     def system_bitsize(self) -> SymbolicInt:
